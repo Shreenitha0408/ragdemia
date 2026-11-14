@@ -19,7 +19,7 @@ Retrieval-augmented generation built from first principles: layout-aware PDF par
 
 ## Live demo
 
-**Live demo: coming soon.** Ask about seven open-access RAG papers, or upload your own PDF; your uploads are private to your browser and deleted after 6 hours. To host your own copy on a free Oracle Cloud server with one command, see [`docs/deployment.md`](docs/deployment.md).
+**Live demo: coming soon.** Ask about seven open-access RAG papers, or upload your own PDF; your uploads are private to your browser and deleted after 6 hours. Deployment (Azure Container Apps, a Linux VM or Docker Compose) is described in [`docs/deployment.md`](docs/deployment.md).
 
 ## Why this project
 
@@ -286,7 +286,9 @@ ragdemia/
 ├── eval/results/         # report.md, summary.json (generated)
 ├── tests/                # hermetic unit and integration tests
 ├── scripts/              # sample-corpus downloader
-├── deploy/oracle/        # one-command public deployment: install.sh, Compose, Caddy (HTTPS)
+├── deploy/container/     # self-contained public-demo image (built by GitHub Actions)
+├── deploy/azure/         # one-command Azure Container Apps deployment (Cloud Shell)
+├── deploy/oracle/        # one-command deployment on any Linux VM: Compose + Caddy (HTTPS)
 ├── deploy/huggingface/   # alternative: Hugging Face Space (Docker SDK, needs PRO)
 ├── docs/                 # design notes, screenshots
 ├── config.yaml

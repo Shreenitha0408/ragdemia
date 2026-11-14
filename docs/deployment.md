@@ -4,7 +4,8 @@
 |---|---|---|---|
 | **Your laptop** (`ragdemia ui`) | Ollama, local GPU | you | local disk |
 | **Docker Compose** (`docker compose up`) | Ollama container | you | `./data` volume |
-| **Public demo** (Oracle Cloud Always Free VM, or any Linux server) | OpenAI-compatible API (Groq free tier) | visitors → private workspaces; you → shared library (admin password) | server disk |
+| **Public demo** (Azure Container Apps, Azure for Students credit) | OpenAI-compatible API (Groq free tier) | visitors → private workspaces; you → shared library (admin password) | Azure Files share |
+| Public demo on any Linux VM (e.g. Oracle Cloud Always Free) | OpenAI-compatible API (Groq free tier) | visitors → private workspaces; you → shared library (admin password) | server disk |
 | Public demo on Hugging Face Spaces (needs HF PRO for Docker) | same | same | private HF dataset |
 
 ## Public mode in one paragraph
@@ -17,7 +18,42 @@ library **and** the visitor's workspace together. Only a request carrying the ad
 stored on the server's disk (or, on Hugging Face Spaces, mirrored to a private dataset because the Space disk is ephemeral).
 Questions and uploads are rate-limited per visitor IP.
 
-## Oracle Cloud Always Free - step by step (recommended)
+## Azure Container Apps - step by step (recommended for students)
+
+**How it fits together.** GitHub Actions (`.github/workflows/demo-image.yml`) builds a
+self-contained image on every push - code, the 7 sample papers, a prebuilt index and the
+cached models (`deploy/container/Dockerfile`) - and publishes it to GitHub Container Registry.
+Azure Container Apps runs that image with HTTPS, **scales to zero** when idle (staying inside the
+monthly free grant), and mounts an Azure Files share so admin uploads survive restarts.
+
+1. **Azure for Students** (no credit card): sign up at
+   [azure.microsoft.com/free/students](https://azure.microsoft.com/free/students) with your
+   college email - $100 credit for 12 months, renewable while you are a student.
+2. **Groq API key** (free): [console.groq.com](https://console.groq.com) → API Keys.
+3. **Make the image public (once):** GitHub → your profile → *Packages* → `ragdemia-demo` →
+   *Package settings* → *Change visibility* → **Public**.
+4. Open **Azure Cloud Shell** ([shell.azure.com](https://shell.azure.com), choose *Bash*;
+   "No storage account required" is fine) and run:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Shreenitha0408/ragdemia/main/deploy/azure/deploy.sh -o deploy.sh
+   ```
+
+   ```bash
+   bash deploy.sh
+   ```
+
+   It asks for the Groq key and an admin password (hidden input, stored as Azure secrets) and
+   prints the HTTPS address, e.g. `https://ragdemia.<random>.centralindia.azurecontainerapps.io`.
+   If the region is not allowed for your subscription: `LOCATION=southindia bash deploy.sh`.
+5. **Updating:** push to GitHub, wait for the *Demo image* workflow, then run `bash deploy.sh`
+   again in Cloud Shell. **Removing everything:** `az group delete -n ragdemia-rg`.
+
+**Cost.** 2 vCPU / 4 GiB with scale-to-zero stays within the Container Apps monthly free grant
+for a low-traffic portfolio demo; the file share costs cents per month. Check *Cost Management*
+in the portal now and then.
+
+## Oracle Cloud Always Free - step by step
 
 Oracle's *Always Free* tier includes an ARM server with up to 4 CPUs and 24 GB RAM at no cost,
 permanently. A card is required to verify your identity; Always Free resources are not charged.

@@ -157,8 +157,11 @@ def create_app(
                 except Exception:  # the demo must still start if storage is unreachable
                     log.exception("could not pull persisted documents")
             lib = Library(cfg, p, counter, storage=storage)
-            if storage is not None:
-                lib.sync()  # index the pulled documents (incremental: only those are embedded)
+            if storage is not None or cfg.server.public:
+                # Index whatever is in the library folder but not yet in the index: documents
+                # pulled from storage, or admin uploads on a mounted volume after a restart.
+                # Incremental, so a no-op when nothing changed.
+                lib.sync()
             state.update(pipeline=p, library=lib, server=cfg.server)
             if cfg.server.public:
                 state["workspaces"] = WorkspaceManager.from_config(
