@@ -1,0 +1,50 @@
+# Full local stack:  docker compose up -d   (GPU: add -f docker-compose.gpu.yml)
+#
+#   ollama  - LLM server (Qwen2.5 7B, 4-bit), port 11434
+#   pull    - one-shot job that downloads the model into the ollama volume
+#   ingest  - one-shot job that (re)builds the index from ./data/raw
+#   ui      - Streamlit web UI, http://localhost:8501
+#   api     - REST API, http://localhost:8000/docs
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes: [ollama:/root/.ollama]
+    ports: ["11434:11434"]
+    restart: unless-stopped
+
+  pull:
+    image: ollama/ollama:latest
+    depends_on: [ollama]
+    environment: [OLLAMA_HOST=http://ollama:11434]
+    entrypoint: ["ollama", "pull", "${RAGDEMIA_MODEL:-qwen2.5:7b}"]
+    restart: "no"
+
+  ingest:
+    build: .
+    command: ["ragdemia", "ingest"]
+    volumes: ["./data:/app/data"]
+    profiles: ["setup"]
+
+  ui:
+    build: .
+    depends_on: [ollama]
+    environment:
+      RAGDEMIA_LLM__BASE_URL: http://ollama:11434
+      RAGDEMIA_LLM__MODEL: ${RAGDEMIA_MODEL:-qwen2.5:7b}
+    volumes: ["./data:/app/data"]
+    ports: ["8501:8501"]
+    restart: unless-stopped
+
+  api:
+    build: .
+    depends_on: [ollama]
+    command: ["uvicorn", "ragdemia.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      RAGDEMIA_LLM__BASE_URL: http://ollama:11434
+      RAGDEMIA_LLM__MODEL: ${RAGDEMIA_MODEL:-qwen2.5:7b}
+    volumes: ["./data:/app/data"]
+    ports: ["8000:8000"]
+    restart: unless-stopped
+
+volumes:
+  ollama:

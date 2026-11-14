@@ -1,0 +1,12 @@
+# NVIDIA GPU for the LLM server. Requires the NVIDIA Container Toolkit
+# (on Windows: Docker Desktop with the WSL 2 backend and a current NVIDIA driver).
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

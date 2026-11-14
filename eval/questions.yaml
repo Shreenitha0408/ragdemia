@@ -1,0 +1,241 @@
+# RAGDemia evaluation set for the sample corpus (7 open-access RAG papers).
+#
+# Every question was written *before* tuning the pipeline and checked by hand against the
+# PDF text. After the first retrieval run, two gold page lists were widened
+# (litm-models, multi-hyde-vs-dpr) because the fact is also stated on pages I had missed;
+# no question text was changed. Fields:
+#   type       factual | numeric | multi_doc | unanswerable
+#   gold       documents (and 1-based pages) that contain the answer - used for retrieval metrics
+#   key_facts  each entry is one required fact; the list inside it holds acceptable phrasings.
+#              Answer score = share of key facts found in the answer (case/space-insensitive).
+#   answer     reference answer, for humans reading the report
+#
+# To evaluate on YOUR documents, copy this file, replace the questions, and run
+#   ragdemia eval --questions eval/my_questions.yaml
+
+questions:
+  # ------------------------------------------------------------------ DPR (2004.04906)
+  - id: dpr-batch
+    type: numeric
+    question: In the DPR paper, what batch size was used for in-batch negative training, and how many additional BM25 negative passages were used per question?
+    answer: A batch size of 128, with one additional BM25 negative passage per question.
+    key_facts: [["128"], ["one additional bm25", "one bm25", "1 bm25", "one additional", "single bm25"]]
+    gold: [{doc: sample/2004.04906, pages: [5]}]
+
+  - id: dpr-top20-nq
+    type: numeric
+    question: What top-20 retrieval accuracy does DPR (single-dataset training) reach on Natural Questions, compared with BM25?
+    answer: 78.4% for DPR versus 59.1% for BM25.
+    key_facts: [["78.4"], ["59.1"]]
+    gold: [{doc: sample/2004.04906, pages: [4, 5]}]
+
+  - id: dpr-encoder
+    type: factual
+    question: Which encoder architecture does DPR use for questions and passages, and which token representation is taken as the embedding?
+    answer: Two independent BERT-base (uncased) encoders; the [CLS] token representation (d = 768).
+    key_facts: [["bert"], ["[cls]", "cls token", "cls"]]
+    gold: [{doc: sample/2004.04906, pages: [3]}]
+
+  - id: dpr-passages
+    type: numeric
+    question: How was Wikipedia split into retrieval units in the DPR paper, and how many passages resulted?
+    answer: Articles were split into disjoint 100-word blocks, giving 21,015,324 passages.
+    key_facts: [["100 words", "100-word", "100 word"], ["21,015,324", "21015324", "21 million", "21m"]]
+    gold: [{doc: sample/2004.04906, pages: [4]}]
+
+  # ------------------------------------------------------------------ RAG (2005.11401)
+  - id: rag-variants
+    type: factual
+    question: What are the two RAG model formulations proposed by Lewis et al., and how do they differ?
+    answer: RAG-Sequence uses the same retrieved document for the whole output sequence; RAG-Token can use a different document for each target token.
+    key_facts: [["rag-sequence", "rag sequence"], ["rag-token", "rag token"]]
+    gold: [{doc: sample/2005.11401, pages: [2, 3]}]
+
+  - id: rag-generator
+    type: factual
+    question: Which generator model does the original RAG paper use, and how many parameters does it have?
+    answer: BART-large, a pre-trained seq2seq transformer with 400M parameters.
+    key_facts: [["bart"], ["400m", "400 million"]]
+    gold: [{doc: sample/2005.11401, pages: [3]}]
+
+  - id: rag-index
+    type: factual
+    question: What knowledge source and index does the RAG paper use for retrieval?
+    answer: The December 2018 Wikipedia dump split into 100-word chunks (21M documents), indexed with FAISS using an HNSW approximation for MIPS.
+    key_facts: [["wikipedia"], ["december 2018", "dec 2018"], ["faiss"]]
+    gold: [{doc: sample/2005.11401, pages: [4]}]
+
+  - id: rag-hotswap
+    type: factual
+    question: What does "index hot-swapping" demonstrate in the RAG paper?
+    answer: Because RAG's knowledge lives in a non-parametric index, the index can be replaced to update the model's knowledge at test time without retraining.
+    key_facts: [["without retrain", "no retrain", "without requiring any retrain", "without any retrain", "without needing to retrain"], ["index"]]
+    gold: [{doc: sample/2005.11401, pages: [8, 9]}]
+
+  # ------------------------------------------------------------------ HyDE (2212.10496)
+  - id: hyde-method
+    type: factual
+    question: Describe the two steps of HyDE (Hypothetical Document Embeddings).
+    answer: An instruction-following LM (e.g. InstructGPT) generates a hypothetical document for the query; an unsupervised contrastive encoder (e.g. Contriever) embeds it and retrieves similar real documents.
+    key_facts: [["hypothetical document"], ["instructgpt", "instruction-following", "instruction following"], ["contriever", "contrastive"]]
+    gold: [{doc: sample/2212.10496, pages: [1, 3]}]
+
+  - id: hyde-bottleneck
+    type: factual
+    question: According to the HyDE paper, how are incorrect (hallucinated) details in the generated document handled?
+    answer: The encoder's dense bottleneck filters out the incorrect details, grounding the vector to real documents in the corpus.
+    key_facts: [["bottleneck"]]
+    gold: [{doc: sample/2212.10496, pages: [1]}]
+
+  - id: hyde-datasets
+    type: factual
+    question: Which web search query sets does HyDE evaluate on?
+    answer: TREC DL19 and TREC DL20 (based on MS-MARCO).
+    key_facts: [["dl19", "dl 19", "dl-19"], ["dl20", "dl 20", "dl-20"]]
+    gold: [{doc: sample/2212.10496, pages: [4, 5]}]
+
+  # ------------------------------------------------------------------ Lost in the Middle (2307.03172)
+  - id: litm-shape
+    type: factual
+    question: What shape does performance follow in "Lost in the Middle" as the position of the relevant document changes, and why?
+    answer: A U-shaped curve - best when relevant information is at the beginning (primacy bias) or end (recency bias), worst in the middle.
+    key_facts: [["u-shaped", "u shaped", "u-shape"], ["beginning", "start", "primacy"], ["end", "recency"]]
+    gold: [{doc: sample/2307.03172, pages: [1, 2]}]
+
+  - id: litm-tasks
+    type: factual
+    question: Which two tasks are used in "Lost in the Middle" to study how language models use long contexts?
+    answer: Multi-document question answering and key-value retrieval.
+    key_facts: [["multi-document question answering", "multi-document qa", "multi-document"], ["key-value", "key value"]]
+    gold: [{doc: sample/2307.03172, pages: [1]}]
+
+  - id: litm-closedbook
+    type: numeric
+    question: In "Lost in the Middle", what is GPT-3.5-Turbo's closed-book accuracy on the multi-document QA task?
+    answer: 56.1% - higher than its accuracy when the relevant document is placed in the middle of 20 documents.
+    key_facts: [["56.1"]]
+    gold: [{doc: sample/2307.03172, pages: [2]}]
+
+  - id: litm-models
+    type: factual
+    question: Which closed-source models are evaluated in "Lost in the Middle"?
+    answer: OpenAI's GPT-3.5-Turbo and Anthropic's Claude-1.3 (GPT-4 in an appendix).
+    key_facts: [["gpt-3.5-turbo", "gpt-3.5", "gpt 3.5"], ["claude-1.3", "claude 1.3", "claude"]]
+    gold: [{doc: sample/2307.03172, pages: [1, 4, 5]}]
+
+  # ------------------------------------------------------------------ Self-RAG (2310.11511)
+  - id: selfrag-tokens
+    type: factual
+    question: What types of reflection tokens does Self-RAG use?
+    answer: Retrieve, ISREL (relevance), ISSUP (support) and ISUSE (usefulness).
+    key_facts: [["retrieve"], ["isrel", "is_rel", "relevan"], ["issup", "is_sup", "support"], ["isuse", "is_use", "useful"]]
+    gold: [{doc: sample/2310.11511, pages: [3, 4, 17]}]
+
+  - id: selfrag-data
+    type: numeric
+    question: How many instruction-output pairs are used to train Self-RAG, and which base LMs are used?
+    answer: 150k instruction-output pairs; Llama2 7B and 13B.
+    key_facts: [["150k", "150,000", "150 000"], ["llama2", "llama 2", "llama-2"]]
+    gold: [{doc: sample/2310.11511, pages: [7]}]
+
+  - id: selfrag-critic
+    type: factual
+    question: How is the training data for Self-RAG's critic model collected?
+    answer: By prompting a proprietary LM, GPT-4, to generate reflection tokens; the critic is trained on this data and then labels the generator's corpus offline.
+    key_facts: [["gpt-4", "gpt4"]]
+    gold: [{doc: sample/2310.11511, pages: [2, 4, 5]}]
+
+  - id: selfrag-closedset
+    type: factual
+    question: Which closed-set tasks are used to evaluate Self-RAG?
+    answer: PubHealth (fact verification on public health) and ARC-Challenge (multiple-choice science reasoning).
+    key_facts: [["pubhealth"], ["arc"]]
+    gold: [{doc: sample/2310.11511, pages: [6, 7]}]
+
+  # ------------------------------------------------------------------ Ragas (2309.15217)
+  - id: ragas-aspects
+    type: factual
+    question: Which three quality aspects does the Ragas framework evaluate?
+    answer: Faithfulness, answer relevance, and context relevance.
+    key_facts: [["faithfulness"], ["answer relevance"], ["context relevance"]]
+    gold: [{doc: sample/2309.15217, pages: [2, 3]}]
+
+  - id: ragas-faithfulness
+    type: factual
+    question: How does Ragas compute the faithfulness score?
+    answer: The LLM extracts statements from the answer and verifies each against the context; F = |V| / |S| (supported statements over total statements).
+    key_facts: [["statement"], ["|v|", "supported", "verified"]]
+    gold: [{doc: sample/2309.15217, pages: [3]}]
+
+  - id: ragas-wikieval
+    type: factual
+    question: How was the WikiEval dataset in the Ragas paper constructed?
+    answer: 50 Wikipedia pages covering events since the start of 2022 were selected, and questions/answers were generated from them and annotated by humans.
+    key_facts: [["50"], ["wikipedia"], ["2022"]]
+    gold: [{doc: sample/2309.15217, pages: [4]}]
+
+  - id: ragas-embedding
+    type: factual
+    question: Which embedding model does Ragas use to compute answer relevance?
+    answer: OpenAI's text-embedding-ada-002 (cosine similarity between the original and generated questions).
+    key_facts: [["text-embedding-ada-002", "ada-002", "ada 002"]]
+    gold: [{doc: sample/2309.15217, pages: [3]}]
+
+  # ------------------------------------------------------------------ RAG survey (2312.10997)
+  - id: survey-paradigms
+    type: factual
+    question: What are the three RAG paradigms described in the RAG survey by Gao et al.?
+    answer: Naive RAG, Advanced RAG, and Modular RAG.
+    key_facts: [["naive"], ["advanced"], ["modular"]]
+    gold: [{doc: sample/2312.10997, pages: [1, 2, 16]}]
+
+  - id: survey-naive
+    type: factual
+    question: According to the survey, what steps make up the Naive RAG process?
+    answer: Indexing, retrieval, and generation - also called the "Retrieve-Read" framework.
+    key_facts: [["indexing"], ["retrieval"], ["generation"]]
+    gold: [{doc: sample/2312.10997, pages: [2, 3]}]
+
+  - id: survey-abilities
+    type: factual
+    question: Which four abilities does the survey list for evaluating RAG systems?
+    answer: Noise robustness, negative rejection, information integration, and counterfactual robustness.
+    key_facts: [["noise robustness"], ["negative rejection"], ["information integration"], ["counterfactual robustness"]]
+    gold: [{doc: sample/2312.10997, pages: [12]}]
+
+  # ------------------------------------------------------------------ Multi-document
+  - id: multi-hyde-vs-dpr
+    type: multi_doc
+    question: How do DPR and HyDE differ in the supervision they need to train a dense retriever?
+    answer: DPR is trained with labelled question-passage pairs (supervised, in-batch negatives); HyDE is fully zero-shot and needs no relevance labels.
+    key_facts: [["question", "labeled", "labelled", "pairs", "supervis"], ["zero-shot", "zero shot", "no relevance", "without relevance", "unsupervised"]]
+    gold: [{doc: sample/2004.04906, pages: [2, 3]}, {doc: sample/2212.10496, pages: [1, 2]}]
+
+  # ------------------------------------------------------------------ Unanswerable (not in the corpus)
+  - id: none-mmlu
+    type: unanswerable
+    question: What accuracy does Self-RAG achieve on the MMLU benchmark?
+    answer: Not in the documents - Self-RAG is not evaluated on MMLU.
+    key_facts: []
+    gold: []
+
+  - id: none-ragas-gpus
+    type: unanswerable
+    question: How many GPUs were used to train the Ragas model?
+    answer: Not in the documents - Ragas is a prompting-based evaluation framework, it does not train a model.
+    key_facts: []
+    gold: []
+
+  - id: none-dpr-chinese
+    type: unanswerable
+    question: Which Chinese question-answering dataset was used to evaluate DPR?
+    answer: Not in the documents - DPR is evaluated on English datasets only.
+    key_facts: []
+    gold: []
+
+  - id: none-hyde-lr
+    type: unanswerable
+    question: What learning rate was used to fine-tune the InstructGPT model in HyDE?
+    answer: Not in the documents - HyDE does not fine-tune InstructGPT; it is used zero-shot.
+    key_facts: []
+    gold: []

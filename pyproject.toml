@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ragdemia"
+version = "0.1.0"
+description = "Retrieval-augmented question answering over your own academic documents, with section-level citations."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Shreenitha" }]
+dependencies = [
+  "pymupdf>=1.24",
+  "numpy>=1.26",
+  "faiss-cpu>=1.8",
+  "sentence-transformers>=3.0",
+  "transformers>=4.44",
+  "httpx>=0.27",
+  "pyyaml>=6.0",
+  "typer>=0.12",
+  "rich>=13.7",
+]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.38"]
+api = ["fastapi>=0.112", "uvicorn>=0.30"]
+hf = ["accelerate>=0.33"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+ragdemia = "ragdemia.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# E501: line length is enforced by `ruff format`; the remaining long lines are string literals.
+# B008: typer declares CLI options as function defaults by design.
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/ragdemia/bm25.py" = ["SIM905"]  # readable stop-word string instead of a 60-line list
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,43 @@
+# RAGDemia configuration. Every value can be overridden with an environment
+# variable: RAGDEMIA_<SECTION>__<KEY>, e.g. RAGDEMIA_LLM__MODEL=llama3.1:8b
+
+paths:
+  raw_dir: data/raw          # PDFs are discovered recursively under this folder
+  index_dir: data/index      # FAISS index, BM25 stats and chunk metadata live here
+
+parsing:
+  min_font_ratio: 0.7        # drop text smaller than 70% of body size (figure labels, axis ticks)
+  skip_sections:             # sections excluded from the index (they pollute retrieval)
+    - references
+    - bibliography
+    - acknowledgments
+    - acknowledgements
+
+chunking:
+  max_tokens: 320            # hard ceiling per chunk (embedding model limit is 512)
+  overlap_tokens: 64         # sentences carried over from the previous chunk
+  min_tokens: 40             # tinier sections are merged into the next one
+
+embedding:
+  model: BAAI/bge-base-en-v1.5
+  # BGE models are trained with an instruction prefix on the *query* side only.
+  query_instruction: "Represent this sentence for searching relevant passages: "
+  batch_size: 32
+  device: auto               # auto | cpu | cuda
+
+retrieval:
+  mode: hybrid               # dense | bm25 | hybrid
+  top_k: 5
+  candidates: 30             # how many results each retriever contributes before fusion
+  rrf_k: 60                  # Reciprocal Rank Fusion constant (Cormack et al., 2009)
+  use_reranker: true
+  reranker_model: BAAI/bge-reranker-base
+
+llm:
+  backend: ollama            # ollama | hf
+  model: qwen2.5:7b          # Ollama model tag
+  hf_model: Qwen/Qwen2.5-3B-Instruct   # used when backend = hf
+  base_url: http://localhost:11434
+  temperature: 0.1
+  max_new_tokens: 512
+  num_ctx: 8192              # context window requested from Ollama

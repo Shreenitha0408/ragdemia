@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Data: documents are never committed (copyright + privacy).
+data/raw/*
+!data/raw/README.md
+!data/raw/private/
+data/raw/private/*
+!data/raw/private/.gitkeep
+data/index/
+
+# Eval outputs are regenerated; keep only the published report
+eval/results/*
+!eval/results/report.md
+!eval/results/summary.json
+
+.env
+.DS_Store
+.streamlit/secrets.toml
