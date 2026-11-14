@@ -213,7 +213,19 @@ class OpenAICompatibleLLM:
             raise LLMError("The LLM API rate limit was reached. Please try again in a minute.")
         if r.status_code >= 400:
             r.read()
-            raise LLMError(f"LLM API error {r.status_code}: {r.text[:300]}")
+            # OpenAI-style errors: {"error": {"message": ..., "code": ...}}; fall back to raw text.
+            detail = r.text[:300]
+            try:
+                err = r.json().get("error", {})
+                detail = err.get("message") or detail
+                if err.get("code"):
+                    detail = f"{detail} (code: {err['code']})"
+            except ValueError:
+                pass
+            raise LLMError(
+                f"LLM API error {r.status_code} for model '{self.model}': "
+                f"{detail or r.reason_phrase or 'no details returned'}"
+            )
 
     def generate(self, messages: list[Message]) -> str:
         try:

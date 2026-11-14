@@ -49,3 +49,17 @@ def test_errors_are_explained(status, msg):
     )
     with pytest.raises(LLMError, match=msg):
         llm.generate([{"role": "user", "content": "x"}])
+
+
+def test_error_message_includes_provider_reason():
+    body = {
+        "error": {
+            "message": "The model `x` has been decommissioned",
+            "code": "model_decommissioned",
+        }
+    }
+    llm = OpenAICompatibleLLM(
+        "x", "https://api.example/v1", transport=transport(lambda r: httpx.Response(400, json=body))
+    )
+    with pytest.raises(LLMError, match="decommissioned.*model_decommissioned"):
+        llm.generate([{"role": "user", "content": "x"}])
