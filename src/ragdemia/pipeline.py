@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from .citations import CitationReport, check_citations
 from .config import Config, load_config
 from .llm import LLM
-from .prompts import closed_book_messages, rag_messages
+from .prompts import clean_rewrite, closed_book_messages, rag_messages, rewrite_messages
 from .retrieval import Mode, RetrievedChunk, Retriever
 
 
@@ -21,6 +21,7 @@ class Answer:
     citations: CitationReport = field(default_factory=CitationReport)
     mode: str = "rag"  # "rag" | "closed_book"
     timings: dict[str, float] = field(default_factory=dict)
+    search_query: str | None = None  # standalone rewrite of a follow-up question, if any
 
     @property
     def cited_sources(self) -> list[tuple[int, RetrievedChunk]]:
@@ -31,6 +32,7 @@ class Answer:
     def to_dict(self) -> dict:
         return {
             "question": self.question,
+            "search_query": self.search_query,
             "answer": self.text,
             "mode": self.mode,
             "sources": [
@@ -72,11 +74,17 @@ class Answer:
         }
 
 
+History = list[tuple[str, str]]  # [(question, answer), ...] oldest first
+
+
 class RAGPipeline:
-    def __init__(self, retriever: Retriever, llm: LLM, top_k: int = 5) -> None:
+    def __init__(
+        self, retriever: Retriever, llm: LLM, top_k: int = 5, index_dir: str = "data/index"
+    ) -> None:
         self.retriever = retriever
         self.llm = llm
         self.top_k = top_k
+        self.index_dir = index_dir
 
     @classmethod
     def from_config(cls, cfg: Config | None = None, llm: LLM | None = None) -> RAGPipeline:
@@ -114,37 +122,83 @@ class RAGPipeline:
             rrf_k=cfg.retrieval.rrf_k,
             reranker=reranker,
         )
-        return cls(retriever, llm or build_llm(cfg.llm), top_k=cfg.retrieval.top_k)
+        return cls(
+            retriever,
+            llm or build_llm(cfg.llm),
+            top_k=cfg.retrieval.top_k,
+            index_dir=cfg.paths.index_dir,
+        )
 
     # ------------------------------------------------------------------ RAG
     def retrieve(self, question: str, top_k: int | None = None, mode: Mode | None = None):
         return self.retriever.retrieve(question, top_k or self.top_k, mode)
 
-    def ask(self, question: str, top_k: int | None = None, mode: Mode | None = None) -> Answer:
+    def reload_index(self) -> None:
+        """Pick up a re-built index (e.g. after uploading a document) without reloading models."""
+        from .store import IndexStore
+
+        self.retriever.store = IndexStore.load(self.index_dir)
+
+    def condense(self, question: str, history: History | None) -> str:
+        """Rewrite a follow-up into a standalone search query (no-op without history)."""
+        if not history:
+            return question
+        raw = self.llm.generate(rewrite_messages(question, history))
+        return clean_rewrite(raw, question)
+
+    def ask(
+        self,
+        question: str,
+        top_k: int | None = None,
+        mode: Mode | None = None,
+        history: History | None = None,
+    ) -> Answer:
         t0 = time.perf_counter()
-        sources = self.retrieve(question, top_k, mode)
+        query = self.condense(question, history)
         t1 = time.perf_counter()
-        text = self.llm.generate(rag_messages(question, sources)).strip()
+        sources = self.retrieve(query, top_k, mode)
         t2 = time.perf_counter()
+        # The answer prompt gets the standalone question, so it is self-contained and the
+        # answer stays grounded only in the sources.
+        text = self.llm.generate(rag_messages(query, sources)).strip()
+        t3 = time.perf_counter()
+        timings = {"retrieval_s": t2 - t1, "generation_s": t3 - t2}
+        if history:
+            timings = {"rewrite_s": t1 - t0, **timings}
         return Answer(
             question=question,
             text=text,
             sources=sources,
             citations=check_citations(text, [s.chunk.text for s in sources]),
             mode="rag",
-            timings={"retrieval_s": t1 - t0, "generation_s": t2 - t1},
+            timings=timings,
+            search_query=query if query != question else None,
         )
 
     def ask_stream(
-        self, question: str, top_k: int | None = None, mode: Mode | None = None
-    ) -> tuple[list[RetrievedChunk], Iterator[str]]:
-        """Retrieve synchronously, then return a token stream (for UIs)."""
-        sources = self.retrieve(question, top_k, mode)
-        return sources, self.llm.stream(rag_messages(question, sources))
+        self,
+        question: str,
+        top_k: int | None = None,
+        mode: Mode | None = None,
+        history: History | None = None,
+    ) -> tuple[str, list[RetrievedChunk], Iterator[str]]:
+        """Condense + retrieve synchronously, then return ``(query, sources, token stream)``."""
+        query = self.condense(question, history)
+        sources = self.retrieve(query, top_k, mode)
+        return query, sources, self.llm.stream(rag_messages(query, sources))
 
-    def finalize(self, question: str, text: str, sources: list[RetrievedChunk]) -> Answer:
+    def finalize(
+        self, question: str, text: str, sources: list[RetrievedChunk], query: str | None = None
+    ) -> Answer:
         texts = [s.chunk.text for s in sources]
-        return Answer(question, text.strip(), sources, check_citations(text, texts), "rag")
+        return Answer(
+            question,
+            text.strip(),
+            sources,
+            check_citations(text, texts),
+            "rag",
+            search_query=query if query and query != question else None,
+        )
 
     # ------------------------------------------------------------------ baseline
     def ask_closed_book(self, question: str) -> Answer:

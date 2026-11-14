@@ -23,3 +23,6 @@ eval/results/*
 .env
 .DS_Store
 .streamlit/secrets.toml
+data/index-*/
+data/raw-*/
+eval/private/

@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = ["streamlit>=1.46"]
-api = ["fastapi>=0.112", "uvicorn>=0.30"]
+api = ["fastapi>=0.112", "uvicorn>=0.30", "python-multipart>=0.0.9"]
 hf = ["accelerate>=0.33"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 

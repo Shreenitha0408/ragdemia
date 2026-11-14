@@ -171,6 +171,58 @@ model (e.g. DeBERTa-MNLI) is the natural upgrade.
   genuinely ambiguous in a corpus that also contains a RAG survey, and it is kept as a
   real failure.
 
+### 2.10 Two document families: LaTeX papers vs. Word/PowerPoint course packs
+
+The first real lecture pack I indexed (an 83-page course pack exported from PowerPoint) broke
+three assumptions that held for every paper:
+
+| Observed failure | Fix |
+|---|---|
+| Chapter "1. Introduction to NLP" and its subsection "1. What is NLP?" have the *same* number; only font size differs (14 pt vs 12 pt), because Word's multi-level numbering was lost on export | If single-number headings occur in two or more sizes, numbering is untrustworthy → levels come from **font-size rank** instead |
+| Bold header cells of the lecture-plan table ("TOPIC", "PROPOSED LECTURE") became headings | Run PyMuPDF's **table detector** on pages with ≥3 heading candidates and ban headings inside tables. Its cell text is *not* used: on LaTeX tables it garbles numbers (59.1 → "591 ."). |
+| Huge administrative page titles ("Lecture Plan", 45 pt) became ancestors of every later chapter | A display-size heading is only a parent for headings **on its own page** |
+
+The lesson I would tell an interviewer: heuristics generalise only as far as the documents
+you have tested them on, so `ragdemia inspect --sections` exists to make the parse visible
+before anything is indexed, and every rule is a regression test.
+
+### 2.11 Incremental indexing (`src/ragdemia/ingest.py`)
+
+The folder is the source of truth; ingest *reconciles* the index with it. Each file's SHA-256
+is stored in the manifest. Unchanged files reuse their chunks **and vectors** (read back out
+of FAISS with `reconstruct_n`, so nothing is re-embedded); new/changed files are parsed and
+embedded; vanished files are dropped. FAISS and BM25 are rebuilt from the final list (ms at
+this scale), which keeps row *i* of every structure aligned.
+
+**The subtle part - cache invalidation.** Reusing old chunks is only correct if today's code
+would produce identical chunks. The manifest stores a *build signature*: a hash of the parser
+version, parsing/chunking settings and embedding model. If it differs, the run becomes a
+full rebuild automatically. Without this, changing `max_tokens` would silently mix two
+chunking schemes in one index.
+
+**Q: Why not just re-embed everything each time?** It is fine at 10 documents, but cost grows
+with the library while the change is usually one file. On the current corpus: full build
+~2 minutes on CPU, no-change sync 0.1 s.
+
+### 2.12 Multi-turn chat: query rewriting (`pipeline.condense`, `prompts.py`)
+
+A follow-up like "how is it trained?" retrieves garbage - "it" matches nothing. Before
+retrieval, the LLM rewrites the follow-up into a standalone question using the last 3 turns
+("How is byte-pair encoding (BPE) trained?"), with a one-shot example of the task. Design
+choices:
+- Only the *query* is rewritten; the answer is still generated from freshly retrieved
+  sources, so conversation history cannot smuggle ungrounded claims into an answer.
+- The rewrite is shown to the user ("↳ searched for: …") - if it misreads the conversation,
+  you can see why the answer is off.
+- No history → no extra LLM call. A topic switch ("Who built ELIZA?") is returned unchanged.
+
+### 2.13 Uploads as an attack surface (`src/ragdemia/library.py`)
+
+Accepting files from a browser means validating them: filenames are reduced to a safe
+basename (`../../etc/passwd` → `passwd.pdf`), content must start with `%PDF`, size is capped
+(50 MB), duplicates are detected by checksum, and only files uploaded through the app can be
+deleted through it - documents placed on disk are never removed by the UI or API.
+
 ---
 
 ## 3. Likely interview questions
@@ -202,7 +254,7 @@ Three layers: invalid-number detection, sentence-level lexical support, and, in
 evaluation, citation precision against gold documents.
 
 **Q: What would you do next?**
-NLI-based faithfulness checking, query rewriting for follow-up questions (multi-turn), OCR
+NLI-based faithfulness checking, OCR
 for scanned notes, multimodal retrieval for figures and slides (a vision-language model such
 as Qwen2-VL), and fine-tuning the embedding model on synthetic question-chunk pairs
 generated from my own corpus.

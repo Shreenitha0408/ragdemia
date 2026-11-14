@@ -83,3 +83,59 @@ def closed_book_messages(question: str) -> list[Message]:
         {"role": "system", "content": CLOSED_BOOK_SYSTEM},
         {"role": "user", "content": f"Question: {question}\n\nAnswer:"},
     ]
+
+
+# --------------------------------------------------------------------------- multi-turn
+# Follow-up questions ("how is it trained?") are useless as search queries: "it" matches
+# nothing.  Before retrieval, the LLM rewrites the follow-up into a standalone question using
+# the conversation so far (the "condense question" step).  Only the *question* is rewritten;
+# the answer is still generated strictly from freshly retrieved sources.
+
+REWRITE_SYSTEM = """You rewrite a follow-up question into a standalone question for a search \
+engine. Use the conversation to replace pronouns and vague references ("it", "that", "the \
+second one", "this method") with what they refer to. Keep the user's wording otherwise. If the \
+follow-up is already standalone, return it unchanged. Output only the question, nothing else."""
+
+_REWRITE_EXAMPLE_USER = """Conversation:
+User: What is byte-pair encoding?
+Assistant: Byte-pair encoding (BPE) is a subword tokenization algorithm that repeatedly merges \
+the most frequent pair of adjacent symbols [1].
+
+Follow-up: how is it trained?
+Standalone question:"""
+_REWRITE_EXAMPLE_ANSWER = "How is byte-pair encoding (BPE) trained?"
+
+MAX_HISTORY_TURNS = 3
+MAX_HISTORY_ANSWER_CHARS = 400
+
+
+def rewrite_messages(question: str, history: list[tuple[str, str]]) -> list[Message]:
+    lines = []
+    for q, a in history[-MAX_HISTORY_TURNS:]:
+        a = a.strip()
+        if len(a) > MAX_HISTORY_ANSWER_CHARS:
+            a = a[:MAX_HISTORY_ANSWER_CHARS].rsplit(" ", 1)[0] + " …"
+        lines += [f"User: {q.strip()}", f"Assistant: {a}"]
+    user = (
+        "Conversation:\n"
+        + "\n".join(lines)
+        + f"\n\nFollow-up: {question.strip()}\nStandalone question:"
+    )
+    return [
+        {"role": "system", "content": REWRITE_SYSTEM},
+        {"role": "user", "content": _REWRITE_EXAMPLE_USER},
+        {"role": "assistant", "content": _REWRITE_EXAMPLE_ANSWER},
+        {"role": "user", "content": user},
+    ]
+
+
+def clean_rewrite(raw: str, original: str) -> str:
+    """Keep the first line, strip quotes/labels; fall back to the original if it looks wrong."""
+    line = next((ln.strip() for ln in raw.strip().splitlines() if ln.strip()), "")
+    for prefix in ("Standalone question:", "Question:", "Rewritten question:"):
+        if line.lower().startswith(prefix.lower()):
+            line = line[len(prefix) :].strip()
+    line = line.strip("\"'“”` ")
+    if not line or len(line) > 3 * len(original) + 200:
+        return original
+    return line

@@ -7,12 +7,15 @@ across requests; loading per request would add seconds of latency.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from .chunking import hf_token_counter
 from .config import load_config
+from .library import Library, LibraryError
 from .llm import LLMError
 from .pipeline import RAGPipeline
 
@@ -21,7 +24,9 @@ _state: dict = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _state["pipeline"] = RAGPipeline.from_config(load_config())
+    cfg = load_config()
+    _state["pipeline"] = RAGPipeline.from_config(cfg)
+    _state["library"] = Library(cfg, _state["pipeline"], hf_token_counter(cfg.embedding.model))
     yield
     _state.clear()
 
@@ -34,8 +39,17 @@ app = FastAPI(
 )
 
 
+class Turn(BaseModel):
+    question: str
+    answer: str
+
+
 class AskRequest(BaseModel):
-    question: str = Field(..., min_length=3, max_length=2000)
+    question: str = Field(..., min_length=2, max_length=2000)
+    history: list[Turn] = Field(
+        default_factory=list,
+        description="Previous turns, oldest first; follow-ups are rewritten into standalone queries",
+    )
     top_k: int | None = Field(None, ge=1, le=20)
     mode: Literal["dense", "bm25", "hybrid"] | None = None
     compare: bool = Field(False, description="Also return a closed-book (no retrieval) answer")
@@ -70,7 +84,48 @@ def health() -> dict:
 
 @app.get("/documents")
 def documents() -> list[dict]:
-    return _pipe().retriever.store.manifest.get("documents", [])
+    _pipe()
+    return _state["library"].documents
+
+
+def _report(report) -> dict:
+    return {
+        "added": report.added,
+        "updated": report.updated,
+        "removed": report.removed,
+        "n_chunks": report.n_chunks,
+        "n_embedded": report.n_embedded,
+        "seconds": round(report.seconds, 2),
+        "failures": [{"path": p, "error": e} for p, e in report.failures],
+    }
+
+
+@app.post("/documents", status_code=201)
+async def upload_documents(files: list[UploadFile] = File(...)) -> dict:
+    """Upload one or more PDFs; they are indexed incrementally and searchable immediately."""
+    _pipe()
+    lib: Library = _state["library"]
+    saved = []
+    try:
+        for f in files:
+            saved.append(str(lib.add(f.filename or "document.pdf", await f.read())))
+    except LibraryError as exc:
+        for path in saved:  # all-or-nothing
+            Path(path).unlink(missing_ok=True)
+        raise HTTPException(400, str(exc)) from exc
+    return {"saved": saved, **_report(lib.sync())}
+
+
+@app.delete("/documents/{doc_id:path}")
+def delete_document(doc_id: str) -> dict:
+    """Remove a document that was uploaded through the API or UI."""
+    _pipe()
+    lib: Library = _state["library"]
+    try:
+        lib.remove(doc_id)
+    except LibraryError as exc:
+        raise HTTPException(403 if "on disk" in str(exc) else 404, str(exc)) from exc
+    return _report(lib.sync())
 
 
 @app.post("/retrieve")
@@ -92,7 +147,8 @@ def retrieve(req: RetrieveRequest) -> list[dict]:
 def ask(req: AskRequest) -> dict:
     p = _pipe()
     try:
-        out = {"rag": p.ask(req.question, req.top_k, req.mode).to_dict()}
+        history = [(t.question, t.answer) for t in req.history]
+        out = {"rag": p.ask(req.question, req.top_k, req.mode, history=history).to_dict()}
         if req.compare:
             out["closed_book"] = p.ask_closed_book(req.question).to_dict()
     except LLMError as exc:

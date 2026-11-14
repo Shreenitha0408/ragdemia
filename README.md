@@ -57,16 +57,19 @@ Evaluated on a hand-written set of 31 questions over a sample corpus of 7 open-a
 
 ## Features
 
-- **Layout-aware PDF parsing.** Recovers the section hierarchy (`2 Methods > 2.1 Models`) from font statistics; removes running headers, page numbers, figure labels, rotated sidebars and the bibliography; repairs missing word spaces and hyphenation.
+- **Layout-aware PDF parsing.** Recovers the section hierarchy (`2 Methods > 2.1 Models`) from font statistics; removes running headers, page numbers, figure labels, rotated sidebars and the bibliography; repairs missing word spaces and hyphenation. Handles both LaTeX papers and Word/PowerPoint-exported course packs, where heading levels are only visible as font sizes and bold table cells must not become headings.
 - **Structure-aware chunking.** Chunks are built from whole sentences, never cross a section boundary, overlap by about 64 tokens, and are sized with the embedding model's own tokenizer.
 - **Hybrid retrieval.** Dense BGE embeddings (FAISS) and a from-scratch BM25 index, fused with Reciprocal Rank Fusion, then reranked by a cross-encoder.
 - **Cited answers.** Each sentence ends with `[n]`, which maps to *document, section, page*.
 - **Citation verification.** Flags citations to non-existent sources, scores sentence-level groundedness, and auto-attributes supported sentences the model forgot to cite (labelled as automatic).
 - **Honest refusals.** "I couldn't find this in your documents" instead of a guess.
 - **Runs fully locally.** An open LLM via Ollama (default) or Hugging Face `transformers`. No API keys and no per-query cost, and documents never leave your machine.
-- **Three interfaces.** CLI (`ragdemia ask`), Streamlit web UI, and a FastAPI REST API.
+- **Multi-turn chat.** Follow-ups such as "how is it trained?" are rewritten into standalone search queries ("How is byte-pair encoding trained?") using the conversation, and the rewrite is shown to the user.
+- **Live document library.** Upload PDFs in the web UI or through `POST /documents`; they are searchable within seconds. Uploaded documents can be removed again, while files you manage on disk are protected.
+- **Incremental indexing.** Each file's SHA-256 checksum is stored; re-ingesting only parses and embeds new or changed files, reuses stored vectors for the rest, and drops deleted files. A change to parser, chunking or embedding settings automatically triggers a full rebuild.
+- **Three interfaces.** CLI (`ragdemia ask`, `ragdemia chat`), a Streamlit chat UI with document manager, and a FastAPI REST API.
 - **Reproducible evaluation.** Retrieval ablation (Hit@k, MRR), RAG vs. closed-book comparison, abstention tests, and a failure analysis that separates retrieval misses from generation misses.
-- **Engineering.** Typed config with environment overrides, an index manifest with checksums, 28 hermetic tests, CI with ruff, and Docker Compose with NVIDIA GPU support.
+- **Engineering.** Typed config with environment overrides, an index manifest with checksums and build signature, 41 hermetic tests, CI with ruff, and Docker Compose with NVIDIA GPU support.
 
 ## Architecture
 
@@ -80,7 +83,9 @@ flowchart LR
         D --> F[(FAISS IndexFlatIP)]
     end
     subgraph Query["Query time (ragdemia ask / UI / API)"]
-        Q[Question] --> G[Dense search]
+        U[Question + chat history] --> R[Query rewriting<br/>follow-up → standalone]
+        R --> Q[Search query]
+        Q --> G[Dense search]
         Q --> H[BM25 search]
         F -.-> G
         E -.-> H
@@ -96,6 +101,7 @@ flowchart LR
 
 ### How a question is answered
 
+0. **Condense (follow-ups only).** If there is conversation history, the LLM first rewrites the question into a standalone one ("how is it trained?" → "How is byte-pair encoding trained?"), because a pronoun matches nothing in a search index. The answer is still generated only from freshly retrieved sources.
 1. **Retrieve candidates two ways.** The question is embedded with BGE (with BGE's query instruction prefix) and compared against every chunk by cosine similarity. In parallel, BM25 scores chunks by exact term overlap, weighted by term rarity. Dense retrieval understands paraphrase; BM25 catches acronyms, dataset names and numbers, which academic questions are full of.
 2. **Fuse.** Reciprocal Rank Fusion, `score(d) = Σ 1/(60 + rank)`, merges the two rankings using ranks rather than incomparable raw scores.
 3. **Rerank.** A cross-encoder reads *(question, passage)* pairs jointly and re-orders the top 15. This is slower than a bi-encoder but much more precise, and it raised MRR substantially (see the ablation above).
@@ -208,12 +214,12 @@ UI at http://localhost:8501 · API docs at http://localhost:8000/docs.
 | Command | What it does |
 |---|---|
 | `ragdemia inspect [--sections]` | Audit PDFs: pages, characters, detected sections, skipped sections, warnings (scanned pages, slides with little text) |
-| `ragdemia ingest` | Parse → chunk → embed → write `data/index/` (FAISS + BM25 + chunks + manifest) |
+| `ragdemia ingest [--full]` | Sync the index with `data/raw/`: only new or changed PDFs are parsed and embedded, deleted ones are dropped (`--full` re-processes everything) |
 | `ragdemia ask "…" [--compare] [--mode dense\|bm25\|hybrid] [-k 8] [--json]` | One answer with a source table |
-| `ragdemia chat` | Interactive session |
+| `ragdemia chat` | Multi-turn session; follow-ups are rewritten into standalone queries (`:new` clears the conversation) |
 | `ragdemia eval [--questions my.yaml] [--retrieval-only]` | Retrieval ablation and RAG vs. closed-book report → `eval/results/` |
 | `ragdemia ui` | Streamlit web UI |
-| `ragdemia serve` | REST API: `GET /health`, `GET /documents`, `POST /retrieve`, `POST /ask` |
+| `ragdemia serve` | REST API: `GET /health`, `GET /documents`, `POST /documents` (upload), `DELETE /documents/{id}`, `POST /retrieve`, `POST /ask` (with optional `history`) |
 
 All settings live in [`config.yaml`](config.yaml) and can be overridden with environment variables, for example `RAGDEMIA_LLM__MODEL=llama3.1:8b` or `RAGDEMIA_RETRIEVAL__TOP_K=8`.
 
@@ -225,7 +231,7 @@ curl -X POST localhost:8000/ask -H "content-type: application/json" -d '{"questi
 
 ## Using your own documents
 
-1. Copy PDFs into `data/raw/private/` (sub-folders are fine).
+1. Upload PDFs in the web UI sidebar (they are stored in `data/raw/uploads/` and indexed immediately), **or** copy them into `data/raw/private/` and run `ragdemia ingest`.
 2. Run `ragdemia inspect`. Scanned PDFs (no text layer) need OCR first, for example `ocrmypdf in.pdf out.pdf`. Slides exported to PDF work; each slide title becomes a section.
 3. Run `ragdemia ingest`.
 4. For a credible evaluation of *your* corpus, write 20–40 questions in the format of `eval/questions.yaml` **before** tuning anything, including a few whose answers are *not* in your documents. Then run `ragdemia eval --questions eval/my_questions.yaml`.
@@ -260,7 +266,8 @@ ragdemia/
 │   ├── llm.py            # Ollama, Hugging Face and stub backends
 │   ├── citations.py      # citation parsing, groundedness, auto-attribution
 │   ├── pipeline.py       # question → retrieve → generate → verify
-│   ├── ingest.py         # end-to-end indexing job
+│   ├── ingest.py         # incremental indexing (checksums, vector reuse, build signature)
+│   ├── library.py        # upload / remove documents at runtime (UI + API)
 │   ├── evaluation.py     # metrics, ablation, Markdown report
 │   ├── api.py            # FastAPI app
 │   ├── cli.py            # `ragdemia` command
@@ -287,11 +294,12 @@ ragdemia/
 
 - [ ] Document-consistency check: flag answers whose cited chunk comes from a different paper than the one the question names
 - [ ] NLI-based faithfulness scoring (DeBERTa-v3-MNLI) alongside lexical support
-- [ ] Multi-turn chat with query rewriting for follow-up questions
+- [x] Multi-turn chat with query rewriting for follow-up questions
+- [x] Upload and remove documents from the web UI and API
 - [ ] OCR fallback for scanned notes; table extraction
 - [ ] Multimodal retrieval over figures and slides with a vision-language model
 - [ ] Domain-adapted embeddings fine-tuned on synthetic question–chunk pairs from the corpus
-- [ ] Incremental ingestion keyed on document checksums
+- [x] Incremental ingestion keyed on document checksums
 
 ## Acknowledgements
 

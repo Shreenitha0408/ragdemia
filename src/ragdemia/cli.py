@@ -112,8 +112,9 @@ def inspect(
 def ingest(
     raw_dir: Path = typer.Argument(None, help="Folder of PDFs (default: paths.raw_dir)"),
     config: Path = ConfigOpt,
+    full: bool = typer.Option(False, "--full", help="Re-process every document"),
 ) -> None:
-    """Parse, chunk and embed all PDFs, and write the search index."""
+    """Sync the index with the PDF folder (only new/changed files are processed)."""
     _quiet_libraries()
     from .chunking import hf_token_counter
     from .embeddings import SentenceTransformerEmbedder
@@ -130,21 +131,33 @@ def ingest(
         counter = hf_token_counter(cfg.embedding.model)
     console.print(f"Embedding model [bold]{emb.model_name}[/bold] on [bold]{emb.device}[/bold]")
     report = run_ingest(
-        cfg, emb, counter, raw_dir=raw_dir, progress=lambda m: console.print(f"  · {m}")
+        cfg, emb, counter, raw_dir=raw_dir, full=full, progress=lambda m: console.print(f"  · {m}")
     )
+    if report.full_rebuild:
+        console.print(f"[dim]full rebuild ({report.rebuild_reason})[/dim]")
 
+    status = {d: "added" for d in report.added} | {d: "updated" for d in report.updated}
     table = Table(title="Indexed documents")
-    for col in ("Document", "Pages", "Sections", "Chunks"):
+    for col in ("Document", "Pages", "Sections", "Chunks", "Status"):
         table.add_column(col)
     for d in report.documents:
-        n = sum(1 for c in report.chunks if c.doc_id == d.doc_id)
-        table.add_row(d.title[:70], str(d.num_pages), str(len(d.sections)), str(n))
+        st = status.get(d["doc_id"], "unchanged")
+        colour = {"added": "green", "updated": "yellow"}.get(st, "dim")
+        table.add_row(
+            f"{d['title'][:60]}\n[dim]{d['doc_id']}[/dim]",
+            str(d["num_pages"]),
+            str(d["n_sections"]),
+            str(d["n_chunks"]),
+            f"[{colour}]{st}[/{colour}]",
+        )
     console.print(table)
+    for doc_id in report.removed:
+        console.print(f"[red]removed {doc_id}[/red] (file no longer in the folder)")
     for path, err in report.failures:
         console.print(f"[yellow]skipped {path}: {err}[/yellow]")
     console.print(
-        f"[green]✓ {len(report.chunks)} chunks from {len(report.documents)} documents "
-        f"in {report.seconds:.1f}s → {report.index_dir}[/green]"
+        f"[green]✓ {report.n_chunks} chunks from {len(report.documents)} documents "
+        f"({report.n_embedded} newly embedded) in {report.seconds:.1f}s → {report.index_dir}[/green]"
     )
 
 
@@ -208,10 +221,16 @@ def ask(
 
 @app.command()
 def chat(config: Path = ConfigOpt) -> None:
-    """Interactive Q&A session (type 'exit' to quit, ':sources' to toggle source table)."""
+    """Multi-turn Q&A. Follow-ups ("how is it trained?") are rewritten using the conversation.
+
+    Commands: exit · :sources (toggle source table) · :new (forget the conversation)
+    """
     pipe = _load_pipeline(config)
     show = True
-    console.print("[bold]RAGDemia[/bold] - ask about your documents. [dim]exit · :sources[/dim]")
+    history: list[tuple[str, str]] = []
+    console.print(
+        "[bold]RAGDemia[/bold] - ask about your documents. [dim]exit · :sources · :new[/dim]"
+    )
     while True:
         try:
             q = console.input("[bold green]›[/bold green] ").strip()
@@ -222,8 +241,17 @@ def chat(config: Path = ConfigOpt) -> None:
         if q == ":sources":
             show = not show
             continue
-        if q:
-            _print_answer(pipe.ask(q), show)
+        if q == ":new":
+            history.clear()
+            console.print("[dim]conversation cleared[/dim]")
+            continue
+        if not q:
+            continue
+        ans = pipe.ask(q, history=history)
+        if ans.search_query:
+            console.print(f"[dim]↳ searched for: {ans.search_query}[/dim]")
+        _print_answer(ans, show)
+        history.append((q, ans.text))
 
 
 # ----------------------------------------------------------------------------- eval

@@ -33,6 +33,9 @@ from pathlib import Path
 
 import pymupdf
 
+# Bump when parsing output changes, so incremental ingest knows old chunks are stale.
+PARSER_VERSION = "2"
+
 # A space is inserted when the gap between two glyphs exceeds this fraction of font size.
 SPACE_GAP_RATIO = 0.12
 # Text whose (normalised) content repeats on at least this share of pages is a header/footer.
@@ -66,6 +69,9 @@ class Block:
     y1: float
     page_height: float
     n_chars: int
+    x0: float = 0.0
+    x1: float = 0.0
+    in_table: bool = False  # inside a detected table: never a heading
 
 
 @dataclass
@@ -207,6 +213,8 @@ def _extract_blocks(doc: pymupdf.Document) -> tuple[list[Block], list[int]]:
                     y1=b["bbox"][3],
                     page_height=page.rect.height,
                     n_chars=n_chars,
+                    x0=b["bbox"][0],
+                    x1=b["bbox"][2],
                 )
             )
         if not page_has_text:
@@ -257,6 +265,8 @@ def _plausible_number(num: str) -> bool:
 
 
 def _looks_like_heading(b: Block, body: float, skip_keys: set[str]) -> bool:
+    if b.in_table:
+        return False
     text = b.text.strip()
     words = text.split()
     if not words or len(words) > HEADING_MAX_WORDS or len(text) > HEADING_MAX_CHARS:
@@ -267,6 +277,8 @@ def _looks_like_heading(b: Block, body: float, skip_keys: set[str]) -> bool:
         return True
     if b.n_lines > 3 or text[-1] in ".,;:" or CAPTION_RE.match(text) or "@" in text:
         return False
+    if re.match(r"^[•●▪■◦❖➢➤►✓✔\-–*]", text):
+        return False  # bullet points, however large or bold
     if re.search(r"[=∼~|∑∈≤≥†∗‡§]", text) or re.search(r"\(\d+\)$", text):
         return False  # equations, author affiliations
     if re.search(r"\s\d+$", text):
@@ -302,6 +314,56 @@ def _heading_level(text: str, size: float, body: float, roman_style: bool) -> in
     return 2
 
 
+TABLE_CHECK_MIN_CANDIDATES = 3  # pages with this many heading candidates get table detection
+
+
+def _mark_table_blocks(
+    doc: pymupdf.Document, blocks: list[Block], body: float, skip_keys: set[str]
+) -> None:
+    """Flag blocks inside tables so bold header cells ("TOPIC", "PERIOD") are not headings.
+
+    PyMuPDF's table finder costs 0.2-5 s per page, so it only runs on pages with several
+    heading candidates - the signature of a table.  Its cell text is *not* used: on LaTeX
+    tables it garbles numbers ("59.1" -> "591 ."), while our glyph-level text is clean.
+    """
+    per_page: dict[int, int] = {}
+    for b in blocks:
+        if _looks_like_heading(b, body, skip_keys):
+            per_page[b.page] = per_page.get(b.page, 0) + 1
+    for page_no, n in per_page.items():
+        if n < TABLE_CHECK_MIN_CANDIDATES:
+            continue
+        try:
+            rects = [pymupdf.Rect(t.bbox) for t in doc[page_no - 1].find_tables().tables]
+        except Exception:  # table detection is best-effort
+            continue
+        for b in blocks:
+            if b.page != page_no:
+                continue
+            centre = pymupdf.Point((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2)
+            if any(r.contains(centre) for r in rects):
+                b.in_table = True
+
+
+def _size_ranked_levels(
+    blocks: list[Block], body: float, skip_keys: set[str]
+) -> dict[float, int] | None:
+    """Heading levels by font size, for documents whose numbering cannot be trusted.
+
+    Word documents exported to PDF often lose multi-level numbering: a chapter and its first
+    subsection both print as "1." and differ only in size (14 pt vs 12 pt).  If single-number
+    headings ("N.") appear in two or more distinct sizes, numbering depth is meaningless, so
+    levels are assigned by size rank instead (largest = 1).  Returns None for documents
+    where numbering is consistent (e.g. LaTeX papers), which keep the numbering-based levels.
+    """
+    heads = [b for b in blocks if _looks_like_heading(b, body, skip_keys)]
+    single = {round(b.size) for b in heads if re.match(r"^\d+\.?\s+[A-Z]", b.text.strip())}
+    if len(single) < 2:
+        return None
+    sizes = sorted({round(b.size) for b in heads}, reverse=True)
+    return {s: i + 1 for i, s in enumerate(sizes)}
+
+
 def _merge_split_numbers(blocks: list[Block]) -> list[Block]:
     """Re-attach section numbers that the PDF emitted as their own block ("2.1" / "Models")."""
     merged: list[Block] = []
@@ -326,6 +388,9 @@ def _merge_split_numbers(blocks: list[Block]) -> list[Block]:
                     y1=nxt.y1,
                     page_height=nxt.page_height,
                     n_chars=b.n_chars + nxt.n_chars,
+                    x0=min(b.x0, nxt.x0),
+                    x1=max(b.x1, nxt.x1),
+                    in_table=b.in_table or nxt.in_table,
                 )
             )
             i += 2
@@ -343,7 +408,20 @@ def _extract_title(doc: pymupdf.Document, blocks: list[Block], fallback: str) ->
         and not re.search(r"microsoft|untitled|\.docx?|\.pdf", meta_title, re.I)
     ):
         return meta_title.strip()
-    first_page = [b for b in blocks if b.page == 1 and len(b.text) > 3]
+    # Use the first page that has text (course packs often open with an image-only cover).
+    first_text_page = min((b.page for b in blocks if len(b.text) > 3 and b.page <= 5), default=None)
+    first_page = [b for b in blocks if b.page == first_text_page and len(b.text) > 3]
+    # A disclaimer page is all body text; keep looking for a page with a display-size line.
+    for page_no in range(first_text_page or 1, 6):
+        # Lines ending in ":" are labels ("Please read this disclaimer before proceeding:").
+        cand = [
+            b
+            for b in blocks
+            if b.page == page_no and len(b.text) > 3 and not b.text.rstrip().endswith(":")
+        ]
+        if cand and max(b.size for b in cand) >= 1.5 * _body_font_size(blocks):
+            first_page = cand
+            break
     if not first_page:
         return fallback
     top = max(b.size for b in first_page)
@@ -382,18 +460,20 @@ def parse_pdf(
         body = _body_font_size(blocks)
         blocks = _remove_noise(blocks, len(doc), body, min_font_ratio)
         blocks = _merge_split_numbers(blocks)
+        _mark_table_blocks(doc, blocks, body, skip)
         title = _extract_title(doc, blocks, fallback=path.stem)
         n_pages = len(doc)
     finally:
         doc.close()
 
     sections: list[Section] = [Section(title="Front matter", path="Front matter", level=1)]
-    stack: list[tuple[int, str]] = []  # (level, heading) for the breadcrumb
+    stack: list[tuple[int, str, int, bool]] = []  # breadcrumb: (level, heading, page, display)
     skipped: list[str] = []
     skipping = False
     title_norm = re.sub(r"\W", "", title.lower())
     roman_style = any(re.match(r"^(I|II|III)\.\s+[A-Z]", b.text) for b in blocks)
     in_front_matter = True  # author lists etc. before the abstract / first numbered section
+    size_levels = _size_ranked_levels(blocks, body, skip)
 
     for b in blocks:
         text = b.text.strip()
@@ -401,21 +481,41 @@ def parse_pdf(
             continue  # the title itself is document metadata, not content
         if _looks_like_heading(b, body, skip):
             heading = _clean_heading(text)
-            is_anchor = _heading_key(heading) in {"abstract", "introduction"} or bool(
-                NUMBERED_HEADING_RE.match(heading)
+            # Front matter ends at the abstract, a numbered section, or a display-size heading
+            # (course packs: "Syllabus", "Course Objectives" set at 2-4x body size).
+            is_anchor = (
+                _heading_key(heading) in {"abstract", "introduction"}
+                or bool(NUMBERED_HEADING_RE.match(heading))
+                or b.size >= body * 1.5
             )
             if in_front_matter and not is_anchor:
                 sections[-1].paragraphs.append(Paragraph(text=text, page=b.page))
                 continue
             in_front_matter = False
-            level = _heading_level(heading, b.size, body, roman_style)
+            level = (
+                size_levels[round(b.size)]
+                if size_levels and round(b.size) in size_levels
+                else _heading_level(heading, b.size, body, roman_style)
+            )
             skipping = _heading_key(heading) in skip
             if skipping:
                 skipped.append(heading)
                 continue
-            stack = [(lvl, h) for lvl, h in stack if lvl < level] + [(level, heading)]
+            is_display = b.size >= body * 1.5
+            # Stack entries: (level, heading, page, is_display).  In size-ranked documents
+            # (course packs), a display-size page title ("Lecture Plan", 45 pt) only stays an
+            # ancestor for headings on its own page; otherwise every later chapter would nest
+            # under the last administrative page title.
+            stack = [
+                e
+                for e in stack
+                if e[0] < level and not (size_levels and e[3] and e[2] < b.page and not is_display)
+            ]
+            if stack and stack[-1][1].lower() == heading.lower():
+                stack.pop()  # "Course Objectives" page followed by "COURSE OBJECTIVES" page
+            stack.append((level, heading, b.page, is_display))
             sections.append(
-                Section(title=heading, path=" > ".join(h for _, h in stack), level=level)
+                Section(title=heading, path=" > ".join(e[1] for e in stack), level=level)
             )
             continue
         if skipping:
