@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ui = ["streamlit>=1.38"]
+ui = ["streamlit>=1.46"]
 api = ["fastapi>=0.112", "uvicorn>=0.30"]
 hf = ["accelerate>=0.33"]
 dev = ["pytest>=8.0", "ruff>=0.6"]

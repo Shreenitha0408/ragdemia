@@ -25,11 +25,35 @@ Every stage (PDF layout analysis, chunking, BM25, rank fusion, citation checking
 
 ## Results
 
-Evaluated on a hand-written set of <!--N_Q-->30<!--/N_Q--> questions over a sample corpus of 7 open-access RAG papers (questions, accepted answer phrasings and gold pages in [`eval/questions.yaml`](eval/questions.yaml)). The **same LLM** answers each question twice, with and without retrieval, so the only variable is grounding. Full report with side-by-side answers: [`eval/results/report.md`](eval/results/report.md).
+Evaluated on a hand-written set of 31 questions over a sample corpus of 7 open-access RAG papers (questions, accepted answer phrasings and gold pages in [`eval/questions.yaml`](eval/questions.yaml)). The **same LLM** answers each question twice, with and without retrieval, so the only variable is grounding. Full report with side-by-side answers: [`eval/results/report.md`](eval/results/report.md).
 
-<!--RESULTS-->
-*(results are inserted here by the evaluation run)*
-<!--/RESULTS-->
+**Grounding (same LLM, with vs. without retrieval)**
+
+| Metric | LLM alone | RAGDemia | Δ |
+|---|---:|---:|---:|
+| Key-fact recall, 27 answerable questions | 15% | **75%** | +60 pp |
+| Fully correct answers | 7% | **67%** | +59 pp |
+| Numeric questions (exact figures from the papers) | 0% | **80%** | +80 pp |
+| Correct refusal, 4 unanswerable questions | 50% | **75%** | +25 pp |
+| Answers citing a gold document | n/a | **96%** | |
+| Answer sentences supported by retrieved text | n/a | **98%** | |
+
+**Retrieval ablation** (gold = right document *and* page, top-5)
+
+| Retriever | Hit@5 | MRR |
+|---|---:|---:|
+| Dense (BGE + FAISS) | 81% | 0.608 |
+| BM25 | 81% | 0.591 |
+| Hybrid (RRF) | 81% | 0.575 |
+| **Hybrid + cross-encoder rerank** | **96%** | **0.861** |
+
+*LLM for this run: Qwen2.5-3B-Instruct on CPU (Hugging Face backend), greedy decoding. The default laptop setup uses the larger Qwen2.5-7B via Ollama.*
+
+**What the numbers say**
+
+- **Without retrieval, the model invents specifics.** Asked how DPR split Wikipedia, it answered "by sentence"; RAGDemia answered "disjoint 100-word blocks, 21,015,324 passages [1]", with section and page. Asked for Self-RAG's MMLU accuracy (never reported), the plain LLM said "85.3%"; RAGDemia said the documents don't contain it.
+- **Reranking is the component that matters most.** Dense, BM25 and their fusion each find the gold page for 81% of questions; the cross-encoder lifts that to 96% and pushes the right chunk to rank 1 much more often (MRR 0.58 → 0.86).
+- **Remaining errors are mostly on the generation side.** In 8 of the 9 answerable misses the evidence *was* retrieved. The 3B model either refused too cautiously (3 cases) or read the wrong cell of a results table, e.g. DPR's batch size as 16 (from an ablation table) instead of 128. A larger generator (the 7B default) is the first lever here, not more retrieval work. One error is instructive: asked how many GPUs trained "the Ragas model" (Ragas trains no model), RAGDemia quoted Self-RAG's hardware from a retrieved chunk. This is a *misattribution* across documents, and the next item on the roadmap addresses it.
 
 ## Features
 
@@ -219,7 +243,7 @@ curl -X POST localhost:8000/ask -H "content-type: application/json" -d '{"questi
 
 Design decisions: retrieval and generation are scored separately, so every failure can be attributed to one of them. An LLM-as-judge is avoided because a small local judge is noisy and hard to defend. Both systems share the same model, decoding settings and answer rules.
 
-**Limitations.** The sample papers are public, so the closed-book model may have seen them during pre-training; on private lecture notes the gap is expected to be larger. String matching undercounts correct paraphrases. The test set is small (30 questions), so differences of a few points are not significant.
+**Limitations.** The sample papers are public, so the closed-book model may have seen them during pre-training; on private lecture notes the gap is expected to be larger. String matching undercounts correct paraphrases. The test set is small (31 questions), so differences of a few points are not significant.
 
 ## Project structure
 
@@ -261,6 +285,7 @@ ragdemia/
 
 ## Roadmap
 
+- [ ] Document-consistency check: flag answers whose cited chunk comes from a different paper than the one the question names
 - [ ] NLI-based faithfulness scoring (DeBERTa-v3-MNLI) alongside lexical support
 - [ ] Multi-turn chat with query rewriting for follow-up questions
 - [ ] OCR fallback for scanned notes; table extraction

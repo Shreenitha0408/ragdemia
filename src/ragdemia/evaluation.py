@@ -413,8 +413,9 @@ def render_report(meta: dict, retrieval: dict, answers: list[dict], summary: dic
         for r in failures:
             rr = r["rag"]
             hit = rr.get("retrieval_hit")
+            hit_cell = "yes" if hit else "no"
             if r["type"] == "unanswerable":
-                diag, fr = "answered an unanswerable question", "-"
+                diag, fr, hit_cell = "answered an unanswerable question", "-", "-"
             else:
                 fr = _pct(rr["fact_recall"])
                 if not hit:
@@ -424,7 +425,7 @@ def render_report(meta: dict, retrieval: dict, answers: list[dict], summary: dic
                 else:
                     diag = "generation miss / paraphrase (evidence was retrieved)"
             L.append(
-                f"| {r['id']} | {fr} | {'yes' if hit else 'no'} | {'yes' if rr['abstained'] else 'no'} | {diag} |"
+                f"| {r['id']} | {fr} | {hit_cell} | {'yes' if rr['abstained'] else 'no'} | {diag} |"
             )
         L.append("")
     L.append("## Method notes\n")
@@ -482,3 +483,13 @@ def run_evaluation(
             render_report(meta, retrieval, answers, summary), encoding="utf-8"
         )
     return {"meta": meta, "retrieval": retrieval, "answers": summary}
+
+
+def rerender_report(out_dir: str | Path) -> None:
+    """Rebuild report.md from saved results (no models needed)."""
+    out = Path(out_dir)
+    saved = json.loads((out / "summary.json").read_text())
+    with open(out / "answers.jsonl", encoding="utf-8") as fh:
+        answers = [json.loads(line) for line in fh if line.strip()]
+    report = render_report(saved["meta"], saved["retrieval"], answers, saved["answers"])
+    (out / "report.md").write_text(report, encoding="utf-8")

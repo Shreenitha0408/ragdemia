@@ -83,7 +83,7 @@ examples = [
 ]
 cols = st.columns(len(examples))
 for col, ex in zip(cols, examples, strict=True):
-    if col.button(ex, use_container_width=True):
+    if col.button(ex, width="stretch"):
         st.session_state["q"] = ex
 
 question = st.text_input(
@@ -177,6 +177,6 @@ if question:
                     }
                     for s in c.sentences
                 ],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )

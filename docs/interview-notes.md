@@ -16,7 +16,8 @@ File references point to the code that implements each idea.
 > answer is supported by the retrieved text. I evaluated it against the same LLM without
 > retrieval on a hand-written test set: grounding raised key-fact recall from X% to Y% and
 > turned confident hallucinations on unanswerable questions into explicit refusals. *(Fill in
-> X and Y from `eval/results/report.md`.)*
+> X and Y from `eval/results/report.md`. On the sample corpus with the 3B model: key-fact
+> recall 15% → 75%, fully correct 7% → 67%, Hit@5 81% → 96% with reranking.)*
 
 ---
 
@@ -109,9 +110,9 @@ score(d,q) = Σ_t IDF(t) · tf(t,d)(k1+1) / (tf(t,d) + k1(1 − b + b·|d|/avgdl
 - `IDF` up-weights rare terms ("HyDE", "TriviaQA", "128").
 
 **Q: Why keep a 1990s algorithm next to a neural retriever?** Dense embeddings are weak at
-exact matches: acronyms, dataset names, numbers. In the evaluation, BM25 alone matched or
-beat dense retrieval on this corpus, precisely because academic questions are full of
-rare technical terms.
+exact matches: acronyms, dataset names, numbers. In the evaluation, BM25 alone matched dense
+retrieval (Hit@5 81% each) and found the right *document* for 100% of questions, because
+academic questions are full of rare technical terms.
 
 ### 2.6 Hybrid fusion and reranking (`src/ragdemia/retrieval.py`)
 
