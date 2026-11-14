@@ -46,11 +46,23 @@ read -rsp "Groq API key (starts with gsk_): " LLM_KEY; echo
 read -rsp "Choose an admin password for the shared library: " ADMIN_TOKEN; echo
 [ -n "$LLM_KEY" ] && [ -n "$ADMIN_TOKEN" ] || { echo "Both values are required."; exit 1; }
 
-say "Creating resource group $RG in $LOCATION"
-if ! az group create -n "$RG" -l "$LOCATION" --only-show-errors >/dev/null; then
-  echo "Could not use region '$LOCATION'. Student subscriptions allow only some regions;"
-  echo "re-run with another one, e.g.:  LOCATION=southindia bash deploy.sh"
-  exit 1
+# Student subscriptions only allow a fixed list of regions (an "allowed locations" policy).
+# Read that list and pick a permitted region instead of failing half-way through.
+ALLOWED=$(az policy assignment list --query "[].parameters.listOfAllowedLocations.value[]" -o tsv 2>/dev/null | tr -d '\r' | sort -u)
+if [ -n "$ALLOWED" ] && ! grep -qx "$LOCATION" <<<"$ALLOWED"; then
+  echo "Region '$LOCATION' is not allowed for this subscription. Allowed: $(echo $ALLOWED)"
+  LOCATION=""
+  for pref in southindia westindia centralindia southeastasia eastasia uaenorth japaneast koreacentral westeurope northeurope eastus eastus2 westus2; do
+    if grep -qx "$pref" <<<"$ALLOWED"; then LOCATION="$pref"; break; fi
+  done
+  LOCATION="${LOCATION:-$(head -n1 <<<"$ALLOWED")}"
+fi
+say "Using region: $LOCATION"
+
+# The resource group is only a container; reuse it if it exists (its own region does not
+# restrict where the resources inside it are created).
+if ! az group show -n "$RG" --only-show-errors >/dev/null 2>&1; then
+  az group create -n "$RG" -l "$LOCATION" --only-show-errors >/dev/null
 fi
 
 say "Creating storage for admin uploads"
