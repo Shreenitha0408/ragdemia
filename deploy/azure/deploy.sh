@@ -46,32 +46,39 @@ read -rsp "Groq API key (starts with gsk_): " LLM_KEY; echo
 read -rsp "Choose an admin password for the shared library: " ADMIN_TOKEN; echo
 [ -n "$LLM_KEY" ] && [ -n "$ADMIN_TOKEN" ] || { echo "Both values are required."; exit 1; }
 
-# Student subscriptions only allow a fixed list of regions (an "allowed locations" policy).
-# Read that list and pick a permitted region instead of failing half-way through.
-ALLOWED=$(az policy assignment list --query "[].parameters.listOfAllowedLocations.value[]" -o tsv 2>/dev/null | tr -d '\r' | sort -u)
-if [ -n "$ALLOWED" ] && ! grep -qx "$LOCATION" <<<"$ALLOWED"; then
-  echo "Region '$LOCATION' is not allowed for this subscription. Allowed: $(echo $ALLOWED)"
-  LOCATION=""
-  for pref in southindia westindia centralindia southeastasia eastasia uaenorth japaneast koreacentral westeurope northeurope eastus eastus2 westus2; do
-    if grep -qx "$pref" <<<"$ALLOWED"; then LOCATION="$pref"; break; fi
+# Student subscriptions only allow a fixed list of regions (an "allowed locations" policy that
+# is often assigned above the subscription, where it cannot be listed). So we *probe*: try to
+# create the storage account in each candidate region, nearest to India first, and keep the
+# first region Azure accepts. A disallowed attempt creates nothing.
+if ! az group show -n "$RG" --only-show-errors >/dev/null 2>&1; then
+  az group create -n "$RG" -l "$LOCATION" --only-show-errors >/dev/null 2>&1 \
+    || az group create -n "$RG" -l eastus --only-show-errors >/dev/null
+fi
+
+say "Finding a region your subscription allows, and creating storage for admin uploads"
+STORAGE=$(az storage account list -g "$RG" --query "[0].name" -o tsv)
+if [ -n "$STORAGE" ]; then
+  LOCATION=$(az storage account show -n "$STORAGE" -g "$RG" --query location -o tsv)
+else
+  STORAGE="ragdemia$(openssl rand -hex 4)"
+  FOUND=""
+  for region in "$LOCATION" southindia centralindia westindia southeastasia eastasia uaenorth \
+                koreacentral japaneast australiaeast northeurope westeurope swedencentral \
+                francecentral uksouth eastus eastus2 centralus westus2 westus3 canadacentral; do
+    printf '   trying %-15s ' "$region"
+    if ERR=$(az storage account create -n "$STORAGE" -g "$RG" -l "$region" --sku Standard_LRS \
+          --kind StorageV2 --min-tls-version TLS1_2 --only-show-errors 2>&1 >/dev/null); then
+      echo "ok"; FOUND="$region"; break
+    elif grep -q "RequestDisallowedByAzure" <<<"$ERR"; then
+      echo "not allowed"
+    else
+      echo "failed"; echo "$ERR"; exit 1
+    fi
   done
-  LOCATION="${LOCATION:-$(head -n1 <<<"$ALLOWED")}"
+  [ -n "$FOUND" ] || { echo "No allowed region found. Check Azure portal > Policy > Assignments."; exit 1; }
+  LOCATION="$FOUND"
 fi
 say "Using region: $LOCATION"
-
-# The resource group is only a container; reuse it if it exists (its own region does not
-# restrict where the resources inside it are created).
-if ! az group show -n "$RG" --only-show-errors >/dev/null 2>&1; then
-  az group create -n "$RG" -l "$LOCATION" --only-show-errors >/dev/null
-fi
-
-say "Creating storage for admin uploads"
-STORAGE=$(az storage account list -g "$RG" --query "[0].name" -o tsv)
-if [ -z "$STORAGE" ]; then
-  STORAGE="ragdemia$(openssl rand -hex 4)"
-  az storage account create -n "$STORAGE" -g "$RG" -l "$LOCATION" --sku Standard_LRS \
-    --kind StorageV2 --min-tls-version TLS1_2 --only-show-errors >/dev/null
-fi
 STORAGE_KEY=$(az storage account keys list -n "$STORAGE" -g "$RG" --query "[0].value" -o tsv)
 az storage share-rm create --storage-account "$STORAGE" -g "$RG" -n "$SHARE" --quota 5 \
   --only-show-errors >/dev/null
