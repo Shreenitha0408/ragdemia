@@ -19,7 +19,7 @@ Retrieval-augmented generation built from first principles: layout-aware PDF par
 
 ## Live demo
 
-**[Try RAGDemia on Hugging Face Spaces](LIVE_DEMO_URL)**: ask about seven open-access RAG papers, or upload your own PDF. Your uploads are private to your browser and deleted after 6 hours. Deployment details are in [`docs/deployment.md`](docs/deployment.md).
+**Live demo: coming soon.** Ask about seven open-access RAG papers, or upload your own PDF; your uploads are private to your browser and deleted after 6 hours. To host your own copy on a free Oracle Cloud server with one command, see [`docs/deployment.md`](docs/deployment.md).
 
 ## Why this project
 
@@ -286,7 +286,8 @@ ragdemia/
 ├── eval/results/         # report.md, summary.json (generated)
 ├── tests/                # hermetic unit and integration tests
 ├── scripts/              # sample-corpus downloader
-├── deploy/huggingface/   # Dockerfile + Space card for the public demo
+├── deploy/oracle/        # one-command public deployment: install.sh, Compose, Caddy (HTTPS)
+├── deploy/huggingface/   # alternative: Hugging Face Space (Docker SDK, needs PRO)
 ├── docs/                 # design notes, screenshots
 ├── config.yaml
 ├── Dockerfile · docker-compose.yml · docker-compose.gpu.yml

@@ -1,0 +1,45 @@
+# Public RAGDemia on a single server (Oracle Cloud Always Free, or any Linux VM with ~4 GB RAM).
+# Started by install.sh; secrets come from ./.env (created by install.sh, never committed).
+#
+#   caddy - HTTPS reverse proxy; obtains a Let's Encrypt certificate for $DOMAIN automatically
+#   app   - RAGDemia web app + API in public mode (visitor workspaces, admin-only library)
+services:
+  app:
+    build: ../..
+    command: >
+      sh -c "python scripts/download_sample_corpus.py &&
+             ragdemia ingest &&
+             uvicorn ragdemia.api:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*'"
+    environment:
+      RAGDEMIA_SERVER__PUBLIC: "true"
+      RAGDEMIA_EMBEDDING__DEVICE: cpu
+      RAGDEMIA_LLM__BACKEND: openai
+      RAGDEMIA_LLM__BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai/v1}
+      RAGDEMIA_LLM__MODEL: ${LLM_MODEL:-llama-3.1-8b-instant}
+      RAGDEMIA_LLM__API_KEY_ENV: LLM_API_KEY
+      LLM_API_KEY: ${LLM_API_KEY}
+      RAGDEMIA_ADMIN_TOKEN: ${ADMIN_TOKEN}
+    volumes:
+      - ../../data:/app/data          # sample corpus, admin uploads and index survive restarts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 300s
+
+  caddy:
+    image: caddy:2
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data              # certificates
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
