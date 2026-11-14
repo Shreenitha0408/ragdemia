@@ -24,7 +24,27 @@ IMAGE="${IMAGE:-ghcr.io/shreenitha0408/ragdemia-demo:latest}"
 
 say() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
+# Deploy the image by its immutable digest (sha256:...), not the moving "latest" tag, so
+# Azure always pulls the newest build instead of reusing a cached copy of the tag.
+resolve_image() {
+  local repo="${IMAGE%%:*}" path token digest
+  path="${repo#ghcr.io/}"
+  token=$(curl -fsS "https://ghcr.io/token?scope=repository:${path}:pull" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])") || return 0
+  digest=$(curl -fsSI -H "Authorization: Bearer $token" \
+    -H "Accept: application/vnd.oci.image.index.v1+json" \
+    -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+    -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+    -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+    "https://ghcr.io/v2/${path}/manifests/${IMAGE##*:}" \
+    | grep -i '^docker-content-digest:' | awk '{print $2}' | tr -d '\r')
+  [ -n "$digest" ] && IMAGE="${repo}@${digest}"
+  return 0
+}
+
 say "Preparing the Azure CLI"
+resolve_image
+echo "   image: $IMAGE"
 az extension add --name containerapp --upgrade --yes --only-show-errors >/dev/null
 for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.Storage; do
   az provider register --namespace "$ns" --wait --only-show-errors >/dev/null
