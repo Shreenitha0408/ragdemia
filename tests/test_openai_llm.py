@@ -77,3 +77,55 @@ def test_whitespace_around_pasted_key_is_removed():
     )
     llm.generate([{"role": "user", "content": "x"}])
     assert seen["auth"] == "Bearer gsk_abc123"
+
+
+def test_retired_model_switches_to_an_available_one():
+    calls = []
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"id": "whisper-large-v3"},
+                        {"id": "llama-3.3-70b-versatile"},
+                        {"id": "qwen/qwen3-32b"},
+                    ]
+                },
+            )
+        model = json.loads(request.content)["model"]
+        calls.append(model)
+        if model == "llama-3.1-8b-instant":
+            return httpx.Response(
+                404, json={"error": {"message": "does not exist", "code": "model_not_found"}}
+            )
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": f"answer from {model}"}}]}
+        )
+
+    llm = OpenAICompatibleLLM(
+        "llama-3.1-8b-instant", "https://api.example/v1", transport=transport(handler)
+    )
+    assert llm.generate([{"role": "user", "content": "x"}]) == "answer from llama-3.3-70b-versatile"
+    assert llm.name == "openai:llama-3.3-70b-versatile"
+    # later calls go straight to the new model
+    llm.generate([{"role": "user", "content": "y"}])
+    assert calls == ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "llama-3.3-70b-versatile"]
+
+
+def test_retired_model_switch_also_works_when_streaming():
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "openai/gpt-oss-20b"}]})
+        if json.loads(request.content)["model"] == "old":
+            return httpx.Response(
+                404, json={"error": {"message": "gone", "code": "model_decommissioned"}}
+            )
+        body = (
+            f"data: {json.dumps({'choices': [{'delta': {'content': 'ok'}}]})}\n\ndata: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=body)
+
+    llm = OpenAICompatibleLLM("old", "https://api.example/v1", transport=transport(handler))
+    assert "".join(llm.stream([{"role": "user", "content": "x"}])) == "ok"

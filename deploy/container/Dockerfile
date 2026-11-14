@@ -32,7 +32,7 @@ RUN python scripts/download_sample_corpus.py \
 ENV RAGDEMIA_SERVER__PUBLIC=true \
     RAGDEMIA_LLM__BACKEND=openai \
     RAGDEMIA_LLM__BASE_URL=https://api.groq.com/openai/v1 \
-    RAGDEMIA_LLM__MODEL=llama-3.1-8b-instant \
+    RAGDEMIA_LLM__MODEL=llama-3.3-70b-versatile \
     RAGDEMIA_LLM__API_KEY_ENV=LLM_API_KEY \
     HF_HUB_OFFLINE=1
 

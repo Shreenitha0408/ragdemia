@@ -177,6 +177,24 @@ class HFLocalLLM:
         thread.join()
 
 
+# Preferred chat models if the configured one has been retired by the provider (first match
+# wins).  Instruction-tuned models first; reasoning models that emit <think> traces last.
+FALLBACK_MODELS = [
+    "llama-3.3-70b-versatile",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "moonshotai/kimi-k2-instruct",
+    "qwen/qwen3-32b",
+]
+_NOT_CHAT = ("whisper", "guard", "tts", "playai", "orpheus", "distil", "embed")
+
+
+class ModelNotFound(LLMError):
+    """The provider says the requested model does not exist (retired or renamed)."""
+
+
 class OpenAICompatibleLLM:
     """Any endpoint speaking the OpenAI chat-completions protocol.
 
@@ -198,7 +216,8 @@ class OpenAICompatibleLLM:
     ) -> None:
         self.name = f"openai:{model}"
         self.model = model
-        self.url = base_url.rstrip("/") + "/chat/completions"
+        self.base_url = base_url.rstrip("/")
+        self.url = self.base_url + "/chat/completions"
         # Keys pasted from Windows or a password manager often carry an invisible "\r", newline
         # or space; inside an HTTP header that makes the request malformed (an empty 400).
         api_key = "".join((api_key or "").split()) or None
@@ -218,19 +237,63 @@ class OpenAICompatibleLLM:
             r.read()
             # OpenAI-style errors: {"error": {"message": ..., "code": ...}}; fall back to raw text.
             detail = r.text[:300]
+            code = None
             try:
                 err = r.json().get("error", {})
                 detail = err.get("message") or detail
-                if err.get("code"):
-                    detail = f"{detail} (code: {err['code']})"
+                code = err.get("code")
+                if code:
+                    detail = f"{detail} (code: {code})"
             except ValueError:
                 pass
-            raise LLMError(
+            error_cls = (
+                ModelNotFound if code in ("model_not_found", "model_decommissioned") else LLMError
+            )
+            raise error_cls(
                 f"LLM API error {r.status_code} for model '{self.model}': "
                 f"{detail or r.reason_phrase or 'no details returned'}"
             )
 
+    def _switch_model(self) -> bool:
+        """The configured model was retired: pick an available one. Returns True if switched."""
+        try:
+            r = self.client.get(self.base_url + "/models", headers=self.headers)
+            available = (
+                {m["id"] for m in r.json().get("data", [])} if r.status_code == 200 else set()
+            )
+        except (httpx.HTTPError, ValueError):
+            return False
+        choice = next((m for m in FALLBACK_MODELS if m in available), None) or next(
+            (m for m in sorted(available) if not any(k in m.lower() for k in _NOT_CHAT)), None
+        )
+        if not choice or choice == self.model:
+            return False
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "model %s unavailable; switching to %s", self.model, choice
+        )
+        self.model = choice
+        self.name = f"openai:{choice}"
+        return True
+
     def generate(self, messages: list[Message]) -> str:
+        try:
+            return self._generate(messages)
+        except ModelNotFound:
+            if not self._switch_model():
+                raise
+            return self._generate(messages)
+
+    def stream(self, messages: list[Message]) -> Iterator[str]:
+        try:
+            yield from self._stream(messages)
+        except ModelNotFound:
+            if not self._switch_model():
+                raise
+            yield from self._stream(messages)
+
+    def _generate(self, messages: list[Message]) -> str:
         try:
             r = self.client.post(
                 self.url, json=self._payload(messages, False), headers=self.headers
@@ -240,7 +303,7 @@ class OpenAICompatibleLLM:
         self._check(r)
         return r.json()["choices"][0]["message"]["content"] or ""
 
-    def stream(self, messages: list[Message]) -> Iterator[str]:
+    def _stream(self, messages: list[Message]) -> Iterator[str]:
         try:
             with self.client.stream(
                 "POST", self.url, json=self._payload(messages, True), headers=self.headers

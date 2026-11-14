@@ -23,6 +23,6 @@ and page**. Click any `[n]` citation to see the passage it came from.
 - If the answer is not in the documents, RAGDemia says so instead of guessing.
 
 Retrieval (BGE embeddings + BM25 + cross-encoder reranking) and citation checking run in this
-Space; answers are written by an open model (Llama 3.1 8B) through Groq's API.
+Space; answers are written by an open model (Llama 3.3 70B) through Groq's API.
 
 Source code, architecture and evaluation: https://github.com/Shreenitha0408/ragdemia
