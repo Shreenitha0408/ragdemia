@@ -23,8 +23,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ui = ["streamlit>=1.46"]
 api = ["fastapi>=0.112", "uvicorn>=0.30", "python-multipart>=0.0.9"]
+ui = ["ragdemia[api]"]
 hf = ["accelerate>=0.33"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
@@ -33,6 +33,9 @@ ragdemia = "ragdemia.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+ragdemia = ["web/*"]
 
 [tool.ruff]
 line-length = 100

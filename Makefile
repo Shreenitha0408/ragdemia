@@ -1,14 +1,14 @@
 .PHONY: install sample ingest ui api eval test lint docker-up docker-gpu
 
 install:      ## editable install with all extras
-	pip install -e ".[ui,api,dev]"
+	pip install -e ".[api,dev]"
 sample:       ## download the 7-paper sample corpus
 	python scripts/download_sample_corpus.py
 ingest:       ## build the index from data/raw
 	ragdemia ingest
-ui:           ## web UI on :8501
+ui:           ## web app + API on :8000, opens the browser
 	ragdemia ui
-api:          ## REST API on :8000
+api:          ## web app + API on :8000
 	ragdemia serve
 eval:         ## retrieval ablation + RAG vs closed-book report
 	ragdemia eval

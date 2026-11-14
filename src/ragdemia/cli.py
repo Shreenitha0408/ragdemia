@@ -3,18 +3,16 @@
 ragdemia inspect            # audit PDFs before indexing (text, sections, problems)
 ragdemia ingest             # parse -> chunk -> embed -> build the index
 ragdemia ask "question"     # one-shot answer with sources   (--compare for no-RAG side-by-side)
-ragdemia chat               # interactive session
+ragdemia chat               # multi-turn interactive session
 ragdemia eval               # retrieval ablation + RAG vs closed-book report
-ragdemia serve              # REST API (FastAPI)
-ragdemia ui                 # web UI (Streamlit)
+ragdemia serve              # web app + REST API (FastAPI) on :8000
+ragdemia ui                 # same, and open the browser
 """
 
 from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import typer
@@ -302,31 +300,30 @@ def evaluate(
 
 
 @app.command()
-def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
-    """Start the REST API (docs at /docs)."""
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Use 0.0.0.0 to expose on your network"),
+    port: int = 8000,
+    open_browser: bool = typer.Option(False, "--open", help="Open the web app in a browser"),
+) -> None:
+    """Start the web app and REST API (web app at /, API docs at /docs)."""
+    import threading
+    import webbrowser
+
     import uvicorn
 
-    uvicorn.run("ragdemia.api:app", host=host, port=port)
+    url = f"http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}"
+    console.print(
+        f"[bold]RAGDemia[/bold] → web app [cyan]{url}[/cyan] · API docs [cyan]{url}/docs[/cyan]"
+    )
+    if open_browser:
+        threading.Timer(4.0, lambda: webbrowser.open(url)).start()
+    uvicorn.run("ragdemia.api:app", host=host, port=port, log_level="warning")
 
 
 @app.command()
-def ui(port: int = 8501) -> None:
-    """Launch the Streamlit web UI."""
-    candidates = [
-        Path.cwd() / "app" / "streamlit_app.py",
-        Path(__file__).resolve().parents[2] / "app" / "streamlit_app.py",  # editable install
-    ]
-    script = next((p for p in candidates if p.exists()), None)
-    if script is None:
-        console.print(
-            "[red]app/streamlit_app.py not found - run this from the repository root.[/red]"
-        )
-        raise typer.Exit(1)
-    raise typer.Exit(
-        subprocess.call(
-            [sys.executable, "-m", "streamlit", "run", str(script), "--server.port", str(port)]
-        )
-    )
+def ui(port: int = 8000) -> None:
+    """Launch the web app and open it in your browser (same as `serve --open`)."""
+    serve(host="127.0.0.1", port=port, open_browser=True)
 
 
 if __name__ == "__main__":

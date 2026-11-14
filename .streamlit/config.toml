@@ -1,8 +1,0 @@
-[server]
-maxUploadSize = 50   # MB - matches ragdemia.library.MAX_UPLOAD_BYTES
-
-[browser]
-gatherUsageStats = false
-
-[theme]
-primaryColor = "#2e86de"

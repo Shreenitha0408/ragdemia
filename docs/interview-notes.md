@@ -223,6 +223,30 @@ basename (`../../etc/passwd` → `passwd.pdf`), content must start with `%PDF`, 
 (50 MB), duplicates are detected by checksum, and only files uploaded through the app can be
 deleted through it - documents placed on disk are never removed by the UI or API.
 
+### 2.14 The web app (`src/ragdemia/web/`, `api.py`)
+
+**Why not Streamlit?** The first UI was Streamlit. It re-runs the whole script on every
+interaction (answers visibly flicker), and layout control is limited, so a three-pane
+"read the evidence" design was not possible. The current app is plain HTML/CSS/JS served by
+FastAPI: one process, one port, no build step, no framework to justify.
+
+**Streaming with Server-Sent Events.** `POST /ask/stream` emits `meta` (sources, rewritten
+query) as soon as retrieval finishes, then one `token` event per generated fragment, then
+`done` with the verified answer. SSE is plain HTTP (`text/event-stream`), one-directional,
+and proxy-friendly, which is all a chat answer needs; WebSockets would add a handshake and
+two-way state for no benefit. The browser reads it with `fetch` plus a stream reader,
+because `EventSource` only supports GET.
+
+**Designed for verification, not just reading.** Each `[n]` is a button. Clicking it opens
+the passage with the answer's content words highlighted, the section breadcrumb, the page,
+which answer sentences it supports (with support %), and its dense/BM25/rerank ranks. Cited
+sources are shown first; uncited ones are one click away. A groundedness chip turns
+amber or red when the answer drifts from the evidence.
+
+**Testability.** `create_app(pipeline, library)` is an app factory: tests inject a pipeline
+built from a hashing embedder and a stub LLM, then check the SSE event order, uploads and
+static serving without downloading a model.
+
 ---
 
 ## 3. Likely interview questions

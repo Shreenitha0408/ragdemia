@@ -67,7 +67,8 @@ Evaluated on a hand-written set of 31 questions over a sample corpus of 7 open-a
 - **Multi-turn chat.** Follow-ups such as "how is it trained?" are rewritten into standalone search queries ("How is byte-pair encoding trained?") using the conversation, and the rewrite is shown to the user.
 - **Live document library.** Upload PDFs in the web UI or through `POST /documents`; they are searchable within seconds. Uploaded documents can be removed again, while files you manage on disk are protected.
 - **Incremental indexing.** Each file's SHA-256 checksum is stored; re-ingesting only parses and embeds new or changed files, reuses stored vectors for the rest, and drops deleted files. A change to parser, chunking or embedding settings automatically triggers a full rebuild.
-- **Three interfaces.** CLI (`ragdemia ask`, `ragdemia chat`), a Streamlit chat UI with document manager, and a FastAPI REST API.
+- **A web app built for checking answers.** Answers stream in token by token; every `[n]` citation is clickable and opens an **evidence panel** with the exact passage (words used in the answer highlighted), its section breadcrumb, page, and retrieval diagnostics. It also has a document library with drag-and-drop upload, dark mode, and works on a phone. It is plain HTML/CSS/JS served by FastAPI, with no build step.
+- **Three interfaces.** The web app, a CLI (`ragdemia ask`, `ragdemia chat`) and a REST API with Server-Sent-Events streaming.
 - **Reproducible evaluation.** Retrieval ablation (Hit@k, MRR), RAG vs. closed-book comparison, abstention tests, and a failure analysis that separates retrieval misses from generation misses.
 - **Engineering.** Typed config with environment overrides, an index manifest with checksums and build signature, 41 hermetic tests, CI with ruff, and Docker Compose with NVIDIA GPU support.
 
@@ -121,7 +122,8 @@ flowchart LR
 | Reranker | [`BAAI/bge-reranker-base`](https://huggingface.co/BAAI/bge-reranker-base) cross-encoder | Large precision gain on the final top-k |
 | LLM | [Qwen2.5-7B-Instruct](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct), 4-bit, via [Ollama](https://ollama.com) | Fits about 5 GB of VRAM; good instruction-following; Apache-2.0 |
 | LLM (alternative) | Hugging Face `transformers` (`Qwen2.5-3B-Instruct`) | No Ollama needed; used for CI-style and CPU runs |
-| Interfaces | Typer + Rich (CLI), Streamlit (UI), FastAPI (REST) | Simple, well known, easy to demo |
+| Web app | Vanilla HTML/CSS/JS, Server-Sent Events | No build step or framework to explain; streaming over plain HTTP |
+| API / CLI | FastAPI, Typer + Rich | Typed request models and auto-generated docs at `/docs` |
 | Quality | pytest (hermetic), ruff, GitHub Actions | Tests run without downloading any model |
 | Deployment | Docker, Docker Compose (+ NVIDIA GPU override) | One-command local stack |
 
@@ -140,7 +142,7 @@ python -m venv .venv
 Activate the environment (`.venv\Scripts\activate` on Windows, `source .venv/bin/activate` on macOS/Linux), then:
 
 ```bash
-pip install -e ".[ui,api,dev]"
+pip install -e ".[api,dev]"
 ```
 
 > **GPU:** if `python -c "import torch; print(torch.cuda.is_available())"` prints `False` on an NVIDIA machine, install the CUDA build of PyTorch from [pytorch.org](https://pytorch.org/get-started/locally/) first.
@@ -181,7 +183,7 @@ ragdemia ask "What are the three RAG paradigms described in the survey?" --compa
 ragdemia ui
 ```
 
-The UI opens at http://localhost:8501. `--compare` also shows the same LLM's answer without retrieval.
+`ragdemia ui` starts the web app at http://localhost:8000 and opens your browser. `--compare` also shows the same LLM's answer without retrieval.
 
 ### No Ollama? Use the Hugging Face backend
 
@@ -207,7 +209,7 @@ On an NVIDIA GPU, start the stack with the GPU override instead:
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 ```
 
-UI at http://localhost:8501 · API docs at http://localhost:8000/docs.
+Web app at http://localhost:8000 · API docs at http://localhost:8000/docs.
 
 ## Usage
 
@@ -218,8 +220,8 @@ UI at http://localhost:8501 · API docs at http://localhost:8000/docs.
 | `ragdemia ask "…" [--compare] [--mode dense\|bm25\|hybrid] [-k 8] [--json]` | One answer with a source table |
 | `ragdemia chat` | Multi-turn session; follow-ups are rewritten into standalone queries (`:new` clears the conversation) |
 | `ragdemia eval [--questions my.yaml] [--retrieval-only]` | Retrieval ablation and RAG vs. closed-book report → `eval/results/` |
-| `ragdemia ui` | Streamlit web UI |
-| `ragdemia serve` | REST API: `GET /health`, `GET /documents`, `POST /documents` (upload), `DELETE /documents/{id}`, `POST /retrieve`, `POST /ask` (with optional `history`) |
+| `ragdemia ui` | Web app at http://localhost:8000 (opens the browser) |
+| `ragdemia serve` | Web app + REST API without opening a browser: `GET /health`, `GET /documents`, `POST /documents` (upload), `DELETE /documents/{id}`, `POST /retrieve`, `POST /ask` (with optional `history`), `POST /ask/stream` (Server-Sent Events) |
 
 All settings live in [`config.yaml`](config.yaml) and can be overridden with environment variables, for example `RAGDEMIA_LLM__MODEL=llama3.1:8b` or `RAGDEMIA_RETRIEVAL__TOP_K=8`.
 
@@ -269,10 +271,10 @@ ragdemia/
 │   ├── ingest.py         # incremental indexing (checksums, vector reuse, build signature)
 │   ├── library.py        # upload / remove documents at runtime (UI + API)
 │   ├── evaluation.py     # metrics, ablation, Markdown report
-│   ├── api.py            # FastAPI app
+│   ├── api.py            # FastAPI app: REST, SSE streaming, serves the web app
+│   ├── web/              # web app: index.html, app.css, app.js (no build step)
 │   ├── cli.py            # `ragdemia` command
 │   └── config.py         # typed config with env overrides
-├── app/streamlit_app.py  # web UI
 ├── eval/questions.yaml   # test set with key facts and gold pages
 ├── eval/results/         # report.md, summary.json (generated)
 ├── tests/                # hermetic unit and integration tests
