@@ -63,3 +63,17 @@ def test_error_message_includes_provider_reason():
     )
     with pytest.raises(LLMError, match="decommissioned.*model_decommissioned"):
         llm.generate([{"role": "user", "content": "x"}])
+
+
+def test_whitespace_around_pasted_key_is_removed():
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    llm = OpenAICompatibleLLM(
+        "m", "https://api.example/v1", " gsk_abc123\r\n", transport=transport(handler)
+    )
+    llm.generate([{"role": "user", "content": "x"}])
+    assert seen["auth"] == "Bearer gsk_abc123"

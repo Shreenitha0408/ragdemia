@@ -8,6 +8,7 @@
 # First run: asks for your Groq API key and an admin password (typed here, stored only as
 # Azure secrets), creates the resources and prints the app's HTTPS address.
 # Later runs: pull the newest image (built by GitHub Actions) and roll out a new revision.
+# Replace the LLM key:  bash deploy.sh --set-key
 #
 # Resources (all in one resource group, so deleting the group removes everything):
 #   Container Apps environment + app  - 2 vCPU / 4 GiB, scales to zero when idle
@@ -31,6 +32,13 @@ done
 
 # ---------------------------------------------------------------- update an existing app
 if az containerapp show -n "$APP" -g "$RG" --only-show-errors >/dev/null 2>&1; then
+  if [ "${1:-}" = "--set-key" ]; then
+    read -rsp "New Groq API key (starts with gsk_): " NEW_KEY; echo
+    NEW_KEY=$(printf '%s' "$NEW_KEY" | tr -d '[:space:]')
+    [ -n "$NEW_KEY" ] || { echo "No key entered."; exit 1; }
+    az containerapp secret set -n "$APP" -g "$RG" --secrets "llm-key=$NEW_KEY" --only-show-errors >/dev/null
+    say "API key updated"
+  fi
   say "Updating $APP to the latest image"
   az containerapp update -n "$APP" -g "$RG" --image "$IMAGE" \
     --set-env-vars "DEPLOY_STAMP=$(date +%s)" --only-show-errors >/dev/null
@@ -43,6 +51,9 @@ fi
 say "First-time setup (your input is hidden and stored only as Azure secrets)"
 read -rsp "Groq API key (starts with gsk_): " LLM_KEY; echo
 read -rsp "Choose an admin password for the shared library: " ADMIN_TOKEN; echo
+# Pasted keys can carry an invisible carriage return or spaces; remove them.
+LLM_KEY=$(printf '%s' "$LLM_KEY" | tr -d '[:space:]')
+ADMIN_TOKEN=$(printf '%s' "$ADMIN_TOKEN" | tr -d '\r\n')
 [ -n "$LLM_KEY" ] && [ -n "$ADMIN_TOKEN" ] || { echo "Both values are required."; exit 1; }
 
 # Student subscriptions only allow a fixed list of regions (an "allowed locations" policy that

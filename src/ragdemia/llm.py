@@ -199,6 +199,9 @@ class OpenAICompatibleLLM:
         self.name = f"openai:{model}"
         self.model = model
         self.url = base_url.rstrip("/") + "/chat/completions"
+        # Keys pasted from Windows or a password manager often carry an invisible "\r", newline
+        # or space; inside an HTTP header that makes the request malformed (an empty 400).
+        api_key = "".join((api_key or "").split()) or None
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self.params = {"temperature": temperature, "max_tokens": max_new_tokens, "seed": 42}
         self.client = httpx.Client(timeout=timeout, transport=transport)
