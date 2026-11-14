@@ -121,6 +121,8 @@ function renderDocs() {
   const docs = state.docs.filter((d) => !q || d.title.toLowerCase().includes(q) || d.doc_id.toLowerCase().includes(q));
   els.docCount.textContent = state.docs.length;
   els.docSearchWrap.hidden = state.docs.length < 6;
+  $("#emptyLibrary").hidden = state.docs.length > 0;
+  els.suggestions.hidden = state.docs.length === 0;
   if (!state.docs.length) {
     els.docList.innerHTML = `<li class="doc-meta" style="padding:6px 8px">No documents yet. Add a PDF to get started.</li>`;
     return;
@@ -573,6 +575,7 @@ function wire() {
   // library
   $("#uploadBtn").addEventListener("click", () => els.fileInput.click());
   $("#dropzone").addEventListener("click", () => els.fileInput.click());
+  $("#emptyUpload").addEventListener("click", () => els.fileInput.click());
   els.fileInput.addEventListener("change", () => { if (els.fileInput.files.length) upload(els.fileInput.files); els.fileInput.value = ""; });
   els.docList.addEventListener("click", (e) => { const b = e.target.closest("[data-delete]"); if (b) removeDoc(b.dataset.delete); });
   els.docSearch.addEventListener("input", renderDocs);

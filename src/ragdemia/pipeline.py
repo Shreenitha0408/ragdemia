@@ -9,7 +9,13 @@ from dataclasses import dataclass, field
 from .citations import CitationReport, check_citations
 from .config import Config, load_config
 from .llm import LLM
-from .prompts import clean_rewrite, closed_book_messages, rag_messages, rewrite_messages
+from .prompts import (
+    ABSTAIN_RAG,
+    clean_rewrite,
+    closed_book_messages,
+    rag_messages,
+    rewrite_messages,
+)
 from .retrieval import Mode, RetrievedChunk, Retriever
 
 
@@ -95,20 +101,25 @@ class RAGPipeline:
         from .store import IndexStore
 
         cfg = cfg or load_config()
-        store = IndexStore.load(cfg.paths.index_dir)
-        model = store.manifest.get("embedding_model", cfg.embedding.model)
-        if model != cfg.embedding.model:
-            # Querying with a different model than the index was built with gives garbage.
-            raise ValueError(
-                f"Index was built with '{model}' but config uses '{cfg.embedding.model}'. "
-                "Re-run `ragdemia ingest`."
-            )
         embedder = SentenceTransformerEmbedder(
             cfg.embedding.model,
             cfg.embedding.query_instruction,
             cfg.embedding.batch_size,
             cfg.embedding.device,
         )
+        try:
+            store = IndexStore.load(cfg.paths.index_dir)
+        except FileNotFoundError:
+            # Fresh install: start with an empty library; documents are added from the web
+            # app (or with `ragdemia ingest`) and the index is created on the first sync.
+            store = IndexStore.empty(embedder.dim, cfg.embedding.model)
+        model = store.manifest.get("embedding_model", cfg.embedding.model)
+        if model != cfg.embedding.model:
+            # Querying with a different model than the index was built with gives garbage.
+            raise ValueError(
+                f"Index was built with '{model}' but config uses '{cfg.embedding.model}'. "
+                "Re-run `ragdemia ingest --full`."
+            )
         reranker = (
             CrossEncoderReranker(cfg.retrieval.reranker_model, cfg.embedding.device)
             if cfg.retrieval.use_reranker
@@ -137,7 +148,12 @@ class RAGPipeline:
         """Pick up a re-built index (e.g. after uploading a document) without reloading models."""
         from .store import IndexStore
 
-        self.retriever.store = IndexStore.load(self.index_dir)
+        try:
+            self.retriever.store = IndexStore.load(self.index_dir)
+        except FileNotFoundError:
+            self.retriever.store = IndexStore.empty(
+                self.retriever.embedder.dim, self.retriever.embedder.model_name
+            )
 
     def condense(self, question: str, history: History | None) -> str:
         """Rewrite a follow-up into a standalone search query (no-op without history)."""
@@ -160,7 +176,8 @@ class RAGPipeline:
         t2 = time.perf_counter()
         # The answer prompt gets the standalone question, so it is self-contained and the
         # answer stays grounded only in the sources.
-        text = self.llm.generate(rag_messages(query, sources)).strip()
+        # Nothing retrieved (e.g. empty library): refuse without asking the LLM to improvise.
+        text = self.llm.generate(rag_messages(query, sources)).strip() if sources else ABSTAIN_RAG
         t3 = time.perf_counter()
         timings = {"retrieval_s": t2 - t1, "generation_s": t3 - t2}
         if history:
@@ -185,6 +202,8 @@ class RAGPipeline:
         """Condense + retrieve synchronously, then return ``(query, sources, token stream)``."""
         query = self.condense(question, history)
         sources = self.retrieve(query, top_k, mode)
+        if not sources:
+            return query, sources, iter([ABSTAIN_RAG])
         return query, sources, self.llm.stream(rag_messages(query, sources))
 
     def finalize(

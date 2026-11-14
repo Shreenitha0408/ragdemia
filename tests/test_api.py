@@ -92,3 +92,27 @@ def test_upload_and_delete_roundtrip(client, tmp_path):
 def test_upload_rejects_non_pdf(client):
     r = client.post("/documents", files=[("files", ("x.pdf", b"not a pdf", "application/pdf"))])
     assert r.status_code == 400 and "not a PDF" in r.json()["detail"]
+
+
+def test_fresh_install_starts_with_empty_library(tmp_path):
+    """No index yet: the app must start, refuse to answer, and accept the first upload."""
+    from ragdemia.store import IndexStore as Store
+
+    cfg = Config()
+    cfg.paths.raw_dir, cfg.paths.index_dir = str(tmp_path / "raw"), str(tmp_path / "index")
+    cfg.chunking.max_tokens, cfg.chunking.overlap_tokens, cfg.chunking.min_tokens = 80, 20, 10
+    emb = HashingEmbedder()
+    llm = EchoLLM("should not be called")
+    pipe = RAGPipeline(
+        Retriever(Store.empty(emb.dim, emb.model_name), emb), llm, index_dir=cfg.paths.index_dir
+    )
+    app = create_app(pipe, Library(cfg, pipe, whitespace_token_counter))
+    with TestClient(app) as c:
+        assert c.get("/health").json()["n_documents"] == 0
+        events = parse_sse(c.post("/ask/stream", json={"question": "Anything?"}).text)
+        assert events[-1][1]["citations"]["abstained"] and not llm.calls
+        make_paper(tmp_path / "first.pdf")
+        with open(tmp_path / "first.pdf", "rb") as fh:
+            r = c.post("/documents", files=[("files", ("first.pdf", fh, "application/pdf"))])
+        assert r.status_code == 201 and r.json()["added"] == ["uploads/first"]
+        assert c.get("/health").json()["n_documents"] == 1

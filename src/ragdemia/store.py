@@ -60,6 +60,12 @@ class IndexStore:
         (d / "manifest.json").write_text(json.dumps(self.manifest, indent=2), encoding="utf-8")
 
     @classmethod
+    def empty(cls, dim: int, embedding_model: str) -> IndexStore:
+        """An index with no documents yet (fresh install: the user adds PDFs from the web app)."""
+        manifest = {"embedding_model": embedding_model, "n_chunks": 0, "documents": []}
+        return cls.build([], np.zeros((0, dim), dtype="float32"), manifest)
+
+    @classmethod
     def load(cls, index_dir: str | Path) -> IndexStore:
         d = Path(index_dir)
         if not (d / "manifest.json").exists():
