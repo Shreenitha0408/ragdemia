@@ -5,6 +5,8 @@
   VRAM.  No API key, no per-token cost, documents never leave the machine.
 * ``HFLocalLLM`` - loads a model in-process with Hugging Face ``transformers``.  Useful
   when Ollama is not installed (CI, notebooks, servers without root).
+* ``OpenAICompatibleLLM`` - any OpenAI-protocol endpoint (Groq, OpenRouter, vLLM); used by
+  the public demo.
 * ``EchoLLM`` - deterministic stub for tests.
 
 Messages use the OpenAI/Ollama chat format: ``[{"role": "system"|"user"|"assistant",
@@ -175,6 +177,73 @@ class HFLocalLLM:
         thread.join()
 
 
+class OpenAICompatibleLLM:
+    """Any endpoint speaking the OpenAI chat-completions protocol.
+
+    Used for the public demo (Groq's free tier serves open models such as Llama 3.1 8B in about
+    a second), but equally for OpenRouter, a self-hosted vLLM server, or Ollama's ``/v1``.
+    Streaming uses the protocol's own Server-Sent Events: ``data: {json}`` lines carrying
+    ``choices[0].delta.content``, terminated by ``data: [DONE]``.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        base_url: str,
+        api_key: str | None = None,
+        temperature: float = 0.1,
+        max_new_tokens: int = 512,
+        timeout: float = 120.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.name = f"openai:{model}"
+        self.model = model
+        self.url = base_url.rstrip("/") + "/chat/completions"
+        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self.params = {"temperature": temperature, "max_tokens": max_new_tokens, "seed": 42}
+        self.client = httpx.Client(timeout=timeout, transport=transport)
+
+    def _payload(self, messages: list[Message], stream: bool) -> dict:
+        return {"model": self.model, "messages": messages, "stream": stream, **self.params}
+
+    def _check(self, r: httpx.Response) -> None:
+        if r.status_code == 401:
+            raise LLMError("The LLM API rejected the API key (401). Check the configured key.")
+        if r.status_code == 429:
+            raise LLMError("The LLM API rate limit was reached. Please try again in a minute.")
+        if r.status_code >= 400:
+            r.read()
+            raise LLMError(f"LLM API error {r.status_code}: {r.text[:300]}")
+
+    def generate(self, messages: list[Message]) -> str:
+        try:
+            r = self.client.post(
+                self.url, json=self._payload(messages, False), headers=self.headers
+            )
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Could not reach the LLM API at {self.url} ({exc}).") from exc
+        self._check(r)
+        return r.json()["choices"][0]["message"]["content"] or ""
+
+    def stream(self, messages: list[Message]) -> Iterator[str]:
+        try:
+            with self.client.stream(
+                "POST", self.url, json=self._payload(messages, True), headers=self.headers
+            ) as r:
+                self._check(r)
+                for line in r.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    choices = json.loads(data).get("choices") or [{}]
+                    if token := (choices[0].get("delta") or {}).get("content"):
+                        yield token
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Could not reach the LLM API at {self.url} ({exc}).") from exc
+
+
 class EchoLLM:
     """Test double: returns a canned response (or echoes the last user message)."""
 
@@ -197,4 +266,14 @@ def build_llm(cfg) -> LLM:
         return OllamaLLM(cfg.model, cfg.base_url, cfg.temperature, cfg.max_new_tokens, cfg.num_ctx)
     if cfg.backend == "hf":
         return HFLocalLLM(cfg.hf_model, cfg.temperature, cfg.max_new_tokens)
-    raise ValueError(f"Unknown LLM backend '{cfg.backend}' (expected 'ollama' or 'hf')")
+    if cfg.backend == "openai":
+        import os
+
+        return OpenAICompatibleLLM(
+            cfg.model,
+            cfg.base_url,
+            os.environ.get(cfg.api_key_env),
+            cfg.temperature,
+            cfg.max_new_tokens,
+        )
+    raise ValueError(f"Unknown LLM backend '{cfg.backend}' (expected 'ollama', 'hf' or 'openai')")

@@ -39,8 +39,15 @@ def safe_filename(name: str) -> str:
 
 
 class Library:
-    def __init__(self, cfg: Config, pipeline: RAGPipeline, count_tokens: TokenCounter) -> None:
+    def __init__(
+        self,
+        cfg: Config,
+        pipeline: RAGPipeline,
+        count_tokens: TokenCounter,
+        storage=None,  # optional HubStorage: mirrors uploads so they survive restarts
+    ) -> None:
         self.cfg = cfg
+        self.storage = storage
         self.pipeline = pipeline
         self.count_tokens = count_tokens
         self.raw_dir = Path(cfg.paths.raw_dir)
@@ -78,6 +85,14 @@ class Library:
             target = target.with_name(f"{target.stem.rsplit('-', 1)[0]}-{n}.pdf")
             n += 1
         target.write_bytes(data)
+        if self.storage is not None:
+            try:
+                self.storage.push(target)
+            except Exception as exc:
+                target.unlink(missing_ok=True)
+                raise LibraryError(
+                    f"{filename}: could not save to persistent storage ({exc})"
+                ) from exc
         return target
 
     def remove(self, doc_id: str) -> Path:
@@ -90,6 +105,11 @@ class Library:
                 f"({doc['source_path']}) and run `ragdemia ingest`."
             )
         path = Path(doc["source_path"])
+        if self.storage is not None:
+            try:
+                self.storage.delete(path.name)
+            except Exception as exc:
+                raise LibraryError(f"Could not remove from persistent storage ({exc})") from exc
         path.unlink(missing_ok=True)
         return path
 

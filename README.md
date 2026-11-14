@@ -17,6 +17,10 @@ Retrieval-augmented generation built from first principles: layout-aware PDF par
 
 ---
 
+## Live demo
+
+**[Try RAGDemia on Hugging Face Spaces](LIVE_DEMO_URL)**: ask about seven open-access RAG papers, or upload your own PDF. Your uploads are private to your browser and deleted after 6 hours. Deployment details are in [`docs/deployment.md`](docs/deployment.md).
+
 ## Why this project
 
 Large language models answer fluently whether or not they know the answer. For academic material (a professor's lecture notes, an unpublished paper, last week's slides) the model *cannot* know the answer, yet it still produces one. RAGDemia fixes that by making the model answer **only from retrieved passages of your own documents**, **cite every claim** down to the section and page, and **say so when the documents don't contain the answer**.
@@ -68,6 +72,7 @@ Evaluated on a hand-written set of 31 questions over a sample corpus of 7 open-a
 - **Live document library.** Upload PDFs in the web UI or through `POST /documents`; they are searchable within seconds. Uploaded documents can be removed again, while files you manage on disk are protected.
 - **Incremental indexing.** Each file's SHA-256 checksum is stored; re-ingesting only parses and embeds new or changed files, reuses stored vectors for the rest, and drops deleted files. A change to parser, chunking or embedding settings automatically triggers a full rebuild.
 - **A web app built for checking answers.** Answers stream in token by token; every `[n]` citation is clickable and opens an **evidence panel** with the exact passage (words used in the answer highlighted), its section breadcrumb, page, and retrieval diagnostics. It also has a document library with drag-and-drop upload, dark mode, and works on a phone. It is plain HTML/CSS/JS served by FastAPI, with no build step.
+- **Deployable with live document management.** In public mode, each visitor gets a private, temporary workspace whose uploads are searched alongside the shared library. The admin manages the shared library, which persists to a private Hugging Face dataset. Requests are rate-limited, and any OpenAI-compatible LLM API is supported (Groq for the hosted demo).
 - **Three interfaces.** The web app, a CLI (`ragdemia ask`, `ragdemia chat`) and a REST API with Server-Sent-Events streaming.
 - **Reproducible evaluation.** Retrieval ablation (Hit@k, MRR), RAG vs. closed-book comparison, abstention tests, and a failure analysis that separates retrieval misses from generation misses.
 - **Engineering.** Typed config with environment overrides, an index manifest with checksums and build signature, 41 hermetic tests, CI with ruff, and Docker Compose with NVIDIA GPU support.
@@ -270,6 +275,8 @@ ragdemia/
 │   ├── pipeline.py       # question → retrieve → generate → verify
 │   ├── ingest.py         # incremental indexing (checksums, vector reuse, build signature)
 │   ├── library.py        # upload / remove documents at runtime (UI + API)
+│   ├── workspaces.py     # private per-visitor indexes for the public demo
+│   ├── persistence.py    # admin uploads mirrored to a private HF dataset
 │   ├── evaluation.py     # metrics, ablation, Markdown report
 │   ├── api.py            # FastAPI app: REST, SSE streaming, serves the web app
 │   ├── web/              # web app: index.html, app.css, app.js (no build step)
@@ -279,6 +286,7 @@ ragdemia/
 ├── eval/results/         # report.md, summary.json (generated)
 ├── tests/                # hermetic unit and integration tests
 ├── scripts/              # sample-corpus downloader
+├── deploy/huggingface/   # Dockerfile + Space card for the public demo
 ├── docs/                 # design notes, screenshots
 ├── config.yaml
 ├── Dockerfile · docker-compose.yml · docker-compose.gpu.yml

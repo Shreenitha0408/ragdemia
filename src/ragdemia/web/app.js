@@ -38,6 +38,23 @@ const store = {
   set(key, value) { try { localStorage.setItem("ragdemia." + key, JSON.stringify(value)); } catch (e) { /* private mode */ } },
 };
 
+/* ------------------------------------------------------------------ identity */
+// A random id for this browser's private workspace (used by the public demo; harmless locally).
+function newId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
+    (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16));
+}
+const workspaceId = store.get("workspace", null) || newId();
+store.set("workspace", workspaceId);
+let adminToken = "";
+try { adminToken = sessionStorage.getItem("ragdemia.admin") || ""; } catch (e) { /* ignore */ }
+function authHeaders(extra = {}) {
+  const h = { "X-Workspace": workspaceId, ...extra };
+  if (adminToken) h["X-Admin-Token"] = adminToken;
+  return h;
+}
+
 /* ------------------------------------------------------------------ helpers */
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -62,7 +79,7 @@ const icon = {
 };
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, opts);
+  const res = await fetch(path, { ...opts, headers: authHeaders(opts.headers || {}) });
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch (e) { /* not json */ }
@@ -104,6 +121,17 @@ async function loadHealth() {
     state.health = h;
     setStatus("ok", `Ready · ${h.n_documents} document${h.n_documents === 1 ? "" : "s"}`);
     const rows = [["LLM", h.llm], ["Embeddings", h.embedding_model], ["Reranker", h.reranker || "off"]];
+    $("#composerHint").textContent = h.llm.startsWith("openai:")
+      ? `Enter to send · Shift + Enter for a new line · Answers are written by an open model (${h.llm.slice(7)}) from the retrieved passages; check important facts against the sources.`
+      : "Enter to send · Shift + Enter for a new line · Answers come from a local model; check important facts against the sources.";
+    $("#publicBadge").hidden = !h.public;
+    $("#publicBadge").textContent = h.is_admin ? "Admin" : "Public demo";
+    $("#publicBadge").classList.toggle("badge-admin", !!h.is_admin);
+    $("#adminBtn").hidden = !(h.public && h.admin_enabled);
+    $("#adminBtn").textContent = h.is_admin ? "Sign out" : "Admin";
+    $("#dropzoneText").innerHTML = !h.public || h.can_edit_shared
+      ? `<strong>Add PDFs</strong> ${h.public ? "to the shared library" : "or drop them anywhere"}`
+      : `<strong>Add your own PDFs</strong> · private to you${h.workspace ? `, up to ${h.workspace.max_docs} · ${h.workspace.max_mb} MB` : ""}`;
     els.models.innerHTML = rows.map(([k, v]) => `<div class="model"><span>${k}</span><code title="${esc(v)}">${esc(v)}</code></div>`).join("");
     if (!store.get("settings", null)) {
       state.settings.mode = h.defaults.mode;
@@ -121,23 +149,34 @@ function renderDocs() {
   const docs = state.docs.filter((d) => !q || d.title.toLowerCase().includes(q) || d.doc_id.toLowerCase().includes(q));
   els.docCount.textContent = state.docs.length;
   els.docSearchWrap.hidden = state.docs.length < 6;
-  $("#emptyLibrary").hidden = state.docs.length > 0;
+  $("#emptyLibrary").hidden = state.docs.length > 0 || (state.health?.public && !state.health?.can_edit_shared);
   els.suggestions.hidden = state.docs.length === 0;
   if (!state.docs.length) {
     els.docList.innerHTML = `<li class="doc-meta" style="padding:6px 8px">No documents yet. Add a PDF to get started.</li>`;
     return;
   }
-  els.docList.innerHTML = docs.map((d) => `
-    <li class="doc${d._new ? " is-new" : ""}" title="${esc(d.doc_id)}">
+  const docItem = (d) => `
+    <li class="doc${d._new ? " is-new" : ""}${d.scope === "workspace" ? " mine" : ""}" title="${esc(d.doc_id)}">
       <div class="doc-icon">PDF</div>
       <div>
         <div class="doc-title">${esc(d.title)}</div>
-        <div class="doc-meta">${d.num_pages} pages · ${d.n_chunks} chunks</div>
+        <div class="doc-meta">${d.num_pages} page${d.num_pages === 1 ? "" : "s"} · ${d.n_chunks} chunk${d.n_chunks === 1 ? "" : "s"}</div>
       </div>
       ${d.deletable
         ? `<button class="icon-btn danger" data-delete="${esc(d.doc_id)}" aria-label="Remove ${esc(d.title)}" title="Remove from library">${icon.trash}</button>`
-        : `<span class="lock" title="Added on disk — manage the file directly">${icon.lock}</span>`}
-    </li>`).join("") || `<li class="doc-meta" style="padding:6px 8px">No matches.</li>`;
+        : `<span class="lock" title="${state.health?.public ? "Shared library — only the admin can change it" : "Added on disk — manage the file directly"}">${icon.lock}</span>`}
+    </li>`;
+  const mine = docs.filter((d) => d.scope === "workspace");
+  const shared = docs.filter((d) => d.scope !== "workspace");
+  const ttl = state.health?.workspace?.ttl_hours;
+  let html = "";
+  if (state.health?.public || mine.length) {
+    html += `<li class="doc-group">Your uploads <small>private${ttl ? ` · kept ${ttl} h` : ""}</small></li>`;
+    html += mine.map(docItem).join("") || `<li class="doc-meta" style="padding:2px 8px 6px">Upload a PDF to ask about it here.</li>`;
+    html += `<li class="doc-group">Shared library</li>`;
+  }
+  html += shared.map(docItem).join("");
+  els.docList.innerHTML = docs.length || state.health?.public ? html : `<li class="doc-meta" style="padding:6px 8px">No matches.</li>`;
 }
 
 async function loadDocs(newIds = []) {
@@ -159,7 +198,10 @@ async function upload(fileList) {
   try {
     const r = await api("/documents", { method: "POST", body: fd });
     done();
-    toast("ok", `Added ${r.added.length + r.updated.length} document${r.added.length + r.updated.length === 1 ? "" : "s"}`,
+    const n = r.added.length + r.updated.length;
+    toast("ok", r.scope === "workspace"
+      ? `Added ${n} document${n === 1 ? "" : "s"} to your private workspace`
+      : `Added ${n} document${n === 1 ? "" : "s"}${state.health?.public ? " to the shared library" : ""}`,
       `${r.n_embedded} chunks embedded in ${r.seconds.toFixed(1)}s — searchable now`);
     r.failures.forEach((f) => toast("err", "Skipped a file", f.error, 8000));
     await loadDocs([...r.added, ...r.updated]);
@@ -174,7 +216,9 @@ async function upload(fileList) {
 async function removeDoc(docId) {
   const doc = state.docs.find((d) => d.doc_id === docId);
   if (!doc) return;
-  const ok = await confirmDialog("Remove document?", `“${doc.title}” will be deleted and removed from the index. Answers will no longer cite it.`);
+  const ok = await confirmDialog("Remove document?", doc.scope === "workspace"
+    ? `“${doc.title}” will be removed from your private workspace.`
+    : `“${doc.title}” will be deleted from the shared library and the index. Answers will no longer cite it.`);
   if (!ok) return;
   try {
     await api(`/documents/${docId.split("/").map(encodeURIComponent).join("/")}`, { method: "DELETE" });
@@ -382,7 +426,7 @@ async function ask(question) {
   try {
     const res = await fetch("/ask/stream", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ question, history, top_k: state.settings.topK, mode: state.settings.mode, compare: state.settings.compare }),
       signal: state.controller.signal,
     });
@@ -456,7 +500,7 @@ function openEvidence(turnIdx, n) {
   const sc = s.scores || {};
   const diag = [
     ["Dense rank", sc.dense_rank ?? "—"],
-    ["BM25 rank", sc.bm25_rank ?? "—"],
+    ["BM25 rank", Object.entries(sc).find(([k]) => /^bm25(_\d+)?_rank$/.test(k))?.[1] ?? "—"],
     [sc.rerank_score !== undefined ? "Rerank score" : "Score", sc.rerank_score !== undefined ? sc.rerank_score.toFixed(3) : s.score.toFixed(3)],
   ];
   els.evidenceLabel.textContent = `Source ${n} of ${a.sources.length}`;
@@ -608,6 +652,34 @@ function wire() {
     try { localStorage.setItem("ragdemia.theme", document.documentElement.dataset.theme); } catch (e) { /* ignore */ }
   });
 
+  // admin sign-in (public demo only)
+  $("#adminBtn").addEventListener("click", async () => {
+    if (adminToken) {
+      adminToken = "";
+      try { sessionStorage.removeItem("ragdemia.admin"); } catch (e) { /* ignore */ }
+      toast("ok", "Signed out of admin", "", 2500);
+      await loadHealth(); loadDocs();
+      return;
+    }
+    $("#adminError").hidden = true;
+    $("#adminPassword").value = "";
+    $("#adminModal").showModal();
+  });
+  $("#adminModal").addEventListener("close", async () => {
+    if ($("#adminModal").returnValue !== "ok") return;
+    const candidate = $("#adminPassword").value;
+    const res = await fetch("/health", { headers: { "X-Admin-Token": candidate } }).then((r) => r.json()).catch(() => ({}));
+    if (res.is_admin) {
+      adminToken = candidate;
+      try { sessionStorage.setItem("ragdemia.admin", candidate); } catch (e) { /* ignore */ }
+      toast("ok", "Signed in as admin", "Uploads now go to the shared library", 3500);
+      await loadHealth(); loadDocs();
+    } else {
+      $("#adminError").hidden = false;
+      $("#adminModal").showModal();
+    }
+  });
+
   // mobile sidebar
   $("#openSidebar").addEventListener("click", () => { els.sidebar.classList.add("open"); els.scrim.hidden = false; });
   $("#closeSidebar").addEventListener("click", closeSidebar);
@@ -626,8 +698,7 @@ function boot() {
   scrollToBottom(true);
   wire();
   autosize();
-  loadHealth();
-  loadDocs();
+  loadHealth().then(loadDocs);
   els.input.focus();
 }
 boot();

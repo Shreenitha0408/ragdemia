@@ -141,8 +141,16 @@ class RAGPipeline:
         )
 
     # ------------------------------------------------------------------ RAG
-    def retrieve(self, question: str, top_k: int | None = None, mode: Mode | None = None):
-        return self.retriever.retrieve(question, top_k or self.top_k, mode)
+    def retrieve(
+        self,
+        question: str,
+        top_k: int | None = None,
+        mode: Mode | None = None,
+        extra_stores: list | None = None,
+    ):
+        """``extra_stores``: additional indexes searched together with the library (e.g. a
+        visitor's private workspace in the public deployment)."""
+        return self.retriever.retrieve(question, top_k or self.top_k, mode, extra_stores)
 
     def reload_index(self) -> None:
         """Pick up a re-built index (e.g. after uploading a document) without reloading models."""
@@ -168,11 +176,12 @@ class RAGPipeline:
         top_k: int | None = None,
         mode: Mode | None = None,
         history: History | None = None,
+        extra_stores: list | None = None,
     ) -> Answer:
         t0 = time.perf_counter()
         query = self.condense(question, history)
         t1 = time.perf_counter()
-        sources = self.retrieve(query, top_k, mode)
+        sources = self.retrieve(query, top_k, mode, extra_stores)
         t2 = time.perf_counter()
         # The answer prompt gets the standalone question, so it is self-contained and the
         # answer stays grounded only in the sources.
@@ -198,10 +207,11 @@ class RAGPipeline:
         top_k: int | None = None,
         mode: Mode | None = None,
         history: History | None = None,
+        extra_stores: list | None = None,
     ) -> tuple[str, list[RetrievedChunk], Iterator[str]]:
         """Condense + retrieve synchronously, then return ``(query, sources, token stream)``."""
         query = self.condense(question, history)
-        sources = self.retrieve(query, top_k, mode)
+        sources = self.retrieve(query, top_k, mode, extra_stores)
         if not sources:
             return query, sources, iter([ABSTAIN_RAG])
         return query, sources, self.llm.stream(rag_messages(query, sources))

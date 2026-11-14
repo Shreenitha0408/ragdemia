@@ -34,10 +34,22 @@ retrieval:
   reranker_model: BAAI/bge-reranker-base
 
 llm:
-  backend: ollama            # ollama | hf
+  backend: ollama            # ollama | hf | openai (any OpenAI-compatible API)
   model: qwen2.5:7b          # Ollama model tag
   hf_model: Qwen/Qwen2.5-3B-Instruct   # used when backend = hf
   base_url: http://localhost:11434
   temperature: 0.1
   max_new_tokens: 512
   num_ctx: 8192              # context window requested from Ollama
+  api_key_env: RAGDEMIA_LLM_API_KEY   # backend = openai: env var holding the key
+
+server:
+  public: false              # true = public demo: visitor workspaces + admin-only shared library
+  admin_token_env: RAGDEMIA_ADMIN_TOKEN
+  workspace_ttl_hours: 6     # visitor uploads are forgotten after this much inactivity
+  workspace_max_docs: 5
+  workspace_max_mb: 20
+  max_workspaces: 200
+  rate_limit_per_minute: 8   # questions + uploads per visitor (protects the free API quota)
+  persist_repo: ""           # private HF dataset that stores admin uploads, e.g. user/ragdemia-library
+  persist_token_env: HF_TOKEN

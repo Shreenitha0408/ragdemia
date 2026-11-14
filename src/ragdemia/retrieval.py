@@ -19,6 +19,7 @@ fused top-N.
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -38,11 +39,11 @@ class RetrievedChunk:
 
 
 def reciprocal_rank_fusion(
-    rankings: dict[str, list[tuple[int, float]]], k: int = 60
-) -> list[tuple[int, float, dict[str, float]]]:
+    rankings: dict[str, list[tuple[Hashable, float]]], k: int = 60
+) -> list[tuple[Hashable, float, dict[str, float]]]:
     """Fuse several ranked lists of ``(item_id, score)``; returns ``(id, rrf, diagnostics)``."""
-    fused: dict[int, float] = {}
-    diag: dict[int, dict[str, float]] = {}
+    fused: dict[Hashable, float] = {}
+    diag: dict[Hashable, dict[str, float]] = {}
     for name, ranking in rankings.items():
         for rank, (item, score) in enumerate(ranking, start=1):
             fused[item] = fused.get(item, 0.0) + 1.0 / (k + rank)
@@ -93,29 +94,48 @@ class Retriever:
         self.reranker = reranker
 
     def retrieve(
-        self, query: str, top_k: int = 5, mode: Mode | None = None
+        self,
+        query: str,
+        top_k: int = 5,
+        mode: Mode | None = None,
+        extra_stores: list[IndexStore] | None = None,
     ) -> list[RetrievedChunk]:
+        """Retrieve from the main index plus optional extra indexes (a visitor's workspace).
+
+        Several indexes are searched as one: dense cosine scores are directly comparable
+        (same embedding model), so dense hits are merged by score.  BM25 scores are *not*
+        comparable across indexes (IDF depends on each corpus), so each index contributes its
+        own BM25 ranking and Reciprocal Rank Fusion combines them - fusion works on ranks.
+        """
         mode = mode or self.mode
         n = max(top_k, self.candidates)
-        rankings: dict[str, list[tuple[int, float]]] = {}
+        stores = [self.store, *(extra_stores or [])]
+        rankings: dict[str, list[tuple[tuple[int, int], float]]] = {}
         if mode in ("dense", "hybrid"):
-            rankings["dense"] = self.store.dense_search(self.embedder.encode_query(query), n)
+            qvec = self.embedder.encode_query(query)
+            dense = [
+                ((si, i), s) for si, st in enumerate(stores) for i, s in st.dense_search(qvec, n)
+            ]
+            rankings["dense"] = sorted(dense, key=lambda x: x[1], reverse=True)[:n]
         if mode in ("bm25", "hybrid"):
-            rankings["bm25"] = self.store.bm25.search(query, n)
+            for si, st in enumerate(stores):
+                hits = [((si, i), s) for i, s in st.bm25.search(query, n)]
+                if hits or si == 0:
+                    rankings["bm25" if si == 0 else f"bm25_{si}"] = hits
 
-        if mode == "hybrid":
+        if len(rankings) > 1:
             fused = reciprocal_rank_fusion(rankings, k=self.rrf_k)
         else:
             ((name, ranking),) = rankings.items()
             fused = [
-                (i, s, {f"{name}_rank": r, f"{name}_score": round(s, 4)})
-                for r, (i, s) in enumerate(ranking, start=1)
+                (item, s, {f"{name}_rank": r, f"{name}_score": round(s, 4)})
+                for r, (item, s) in enumerate(ranking, start=1)
             ]
 
         pool = top_k * 3 if self.reranker else top_k
         results = [
-            RetrievedChunk(chunk=self.store.chunks[i], score=s, rank=r, scores=d)
-            for r, (i, s, d) in enumerate(fused[:pool], start=1)
+            RetrievedChunk(chunk=stores[si].chunks[i], score=s, rank=r, scores=d)
+            for r, ((si, i), s, d) in enumerate(fused[:pool], start=1)
         ]
         if self.reranker:
             results = self.reranker.rerank(query, results)[:top_k]

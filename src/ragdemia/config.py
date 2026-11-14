@@ -70,6 +70,24 @@ class LLMConfig:
     temperature: float = 0.1
     max_new_tokens: int = 512
     num_ctx: int = 8192
+    # backend = openai: any OpenAI-compatible endpoint (Groq, OpenRouter, vLLM, Ollama /v1).
+    # The key is read from the environment variable named here, never from the config file.
+    api_key_env: str = "RAGDEMIA_LLM_API_KEY"
+
+
+@dataclass
+class ServerConfig:
+    """Public-deployment settings. All off by default: a laptop install is single-user."""
+
+    public: bool = False  # visitor workspaces, admin-only shared library, rate limits
+    admin_token_env: str = "RAGDEMIA_ADMIN_TOKEN"  # env var holding the admin password
+    workspace_ttl_hours: float = 6.0
+    workspace_max_docs: int = 5
+    workspace_max_mb: int = 20
+    max_workspaces: int = 200
+    rate_limit_per_minute: int = 8  # questions + uploads per visitor
+    persist_repo: str = ""  # private HF dataset "user/name" that stores admin uploads
+    persist_token_env: str = "HF_TOKEN"
 
 
 @dataclass
@@ -80,6 +98,7 @@ class Config:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
