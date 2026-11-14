@@ -7,7 +7,8 @@
 #   LLM_API_KEY             API key for the LLM endpoint (Groq by default)
 #   RAGDEMIA_ADMIN_TOKEN    admin password for managing the shared library
 #   optional: RAGDEMIA_LLM__BASE_URL, RAGDEMIA_LLM__MODEL to use another provider/model
-# Mount a persistent volume at /app/data/raw/uploads to keep admin uploads across restarts.
+# Admin uploads persist via AZURE_STORAGE_CONNECTION_STRING (Blob Storage), or a volume
+# mounted at /app/data/raw/uploads.
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
@@ -19,7 +20,7 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 COPY pyproject.toml README.md config.yaml ./
 COPY src ./src
 COPY scripts ./scripts
-RUN pip install -e ".[api]"
+RUN pip install -e ".[api,azure]"
 
 # Bake the corpus, the index and the models so a cold start only has to load them.
 ENV RAGDEMIA_EMBEDDING__DEVICE=cpu

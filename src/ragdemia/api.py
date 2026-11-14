@@ -143,14 +143,11 @@ def create_app(
             p = RAGPipeline.from_config(cfg)
             counter = hf_token_counter(cfg.embedding.model)
             storage = None
-            if cfg.server.public and cfg.server.persist_repo:
-                from .persistence import HubStorage
+            if cfg.server.public:
+                from .persistence import storage_from_config
 
-                storage = HubStorage(
-                    cfg.server.persist_repo,
-                    os.environ.get(cfg.server.persist_token_env),
-                    Path(cfg.paths.raw_dir) / "uploads",
-                )
+                storage = storage_from_config(cfg)
+            if storage is not None:
                 try:
                     storage.ensure_repo()
                     storage.pull()

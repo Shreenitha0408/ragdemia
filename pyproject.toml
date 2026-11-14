@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 api = ["fastapi>=0.112", "uvicorn>=0.30", "python-multipart>=0.0.9"]
 ui = ["ragdemia[api]"]
+azure = ["azure-storage-blob>=12.19"]
 hf = ["accelerate>=0.33"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
