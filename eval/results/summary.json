@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated_at": "2026-11-14 08:41 UTC",
+    "generated_at": "2026-11-14 10:34 UTC",
     "llm": "hf:Qwen/Qwen2.5-3B-Instruct",
     "embedding_model": "BAAI/bge-base-en-v1.5",
     "reranker": "BAAI/bge-reranker-base",
@@ -14,25 +14,25 @@
       "hit@5": 0.8148148148148148,
       "mrr": 0.6080246913580247,
       "doc_hit@5": 0.9259259259259259,
-      "ms_per_query": 79.88651111111687
+      "ms_per_query": 36.62278825926377
     },
     "bm25": {
       "hit@5": 0.8148148148148148,
       "mrr": 0.5907407407407408,
       "doc_hit@5": 1.0,
-      "ms_per_query": 0.1731916666661467
+      "ms_per_query": 0.18515729629210978
     },
     "hybrid (RRF)": {
       "hit@5": 0.8148148148148148,
       "mrr": 0.5753086419753086,
       "doc_hit@5": 0.9629629629629629,
-      "ms_per_query": 35.48465481480889
+      "ms_per_query": 32.13128637036822
     },
     "hybrid + rerank": {
       "hit@5": 0.9629629629629629,
       "mrr": 0.8611111111111112,
       "doc_hit@5": 0.9629629629629629,
-      "ms_per_query": 2682.930207037047
+      "ms_per_query": 3992.529208037038
     }
   },
   "answers": {
@@ -43,7 +43,7 @@
       "fully_correct": 0.6666666666666666,
       "abstain_on_answerable": 0.1111111111111111,
       "correct_abstention": 0.75,
-      "mean_seconds": 16.690967741935484,
+      "mean_seconds": 21.38774193548387,
       "citation_precision": 0.9583333333333334,
       "groundedness": 0.9791666666666666,
       "model_cited_share": 1.0
@@ -55,7 +55,7 @@
       "fully_correct": 0.07407407407407407,
       "abstain_on_answerable": 0.18518518518518517,
       "correct_abstention": 0.5,
-      "mean_seconds": 6.140322580645162
+      "mean_seconds": 7.895806451612903
     },
     "by_type": {
       "factual": {

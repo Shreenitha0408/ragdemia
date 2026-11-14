@@ -1,6 +1,6 @@
 # RAGDemia evaluation report
 
-*Generated 2026-11-14 08:41 UTC · LLM `hf:Qwen/Qwen2.5-3B-Instruct` · embeddings `BAAI/bge-base-en-v1.5` · reranker `BAAI/bge-reranker-base` · top-k = 5 · 31 questions (27 answerable, 4 unanswerable) · corpus: 7 documents / 395 chunks*
+*Generated 2026-11-14 10:34 UTC · LLM `hf:Qwen/Qwen2.5-3B-Instruct` · embeddings `BAAI/bge-base-en-v1.5` · reranker `BAAI/bge-reranker-base` · top-k = 5 · 31 questions (27 answerable, 4 unanswerable) · corpus: 7 documents / 395 chunks*
 
 ## Headline: does grounding help?
 
@@ -10,7 +10,7 @@
 | Fully correct answers | 7% | **67%** | +59 pp |
 | Correct abstention (unanswerable) | 50% | **75%** | +25 pp |
 | Refused an answerable question | 19% | 11% | |
-| Mean latency per question (this machine) | 6.1s | 16.7s | |
+| Mean latency per question (this machine) | 7.9s | 21.4s | |
 
 RAG-only answer diagnostics:
 
@@ -33,10 +33,10 @@ Gold = the document *and page* that contain the answer. Answerable questions onl
 
 | Retriever | Hit@5 | MRR | DocHit@5 | ms / query |
 |---|---:|---:|---:|---:|
-| dense | 81% | 0.608 | 93% | 80 |
+| dense | 81% | 0.608 | 93% | 37 |
 | bm25 | 81% | 0.591 | 100% | 0 |
-| hybrid (RRF) | 81% | 0.575 | 96% | 35 |
-| hybrid + rerank | 96% | 0.861 | 96% | 2683 |
+| hybrid (RRF) | 81% | 0.575 | 96% | 32 |
+| hybrid + rerank | 96% | 0.861 | 96% | 3993 |
 
 ## Case studies: where grounding changed the answer
 
