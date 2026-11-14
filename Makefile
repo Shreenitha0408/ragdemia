@@ -15,7 +15,7 @@ eval:         ## retrieval ablation + RAG vs closed-book report
 test:
 	pytest -q
 lint:
-	ruff check src tests app scripts && ruff format --check src tests app scripts
+	ruff check src tests scripts && ruff format --check src tests scripts
 docker-up:
 	docker compose up -d --build
 docker-gpu:
