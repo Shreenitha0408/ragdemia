@@ -72,9 +72,12 @@ if [ -n "$STORAGE" ]; then
 else
   STORAGE="ragdemia$(openssl rand -hex 4)"
   FOUND=""
-  for region in "$LOCATION" southindia centralindia westindia southeastasia eastasia uaenorth \
+  # East Asia (Hong Kong) is deliberately absent: several LLM APIs, including Groq, refuse
+  # requests from Hong Kong with "403 Forbidden".
+  for region in "$LOCATION" southindia centralindia westindia southeastasia uaenorth \
                 koreacentral japaneast australiaeast northeurope westeurope swedencentral \
                 francecentral uksouth eastus eastus2 centralus westus2 westus3 canadacentral; do
+    [ "$region" = eastasia ] && continue
     printf '   trying %-15s ' "$region"
     if ERR=$(az storage account create -n "$STORAGE" -g "$RG" -l "$region" --sku Standard_LRS \
           --kind StorageV2 --min-tls-version TLS1_2 --only-show-errors 2>&1 >/dev/null); then
