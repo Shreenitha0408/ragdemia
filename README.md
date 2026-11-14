@@ -6,7 +6,7 @@
 
 Retrieval-augmented generation built from first principles: layout-aware PDF parsing, hybrid dense + BM25 retrieval, cross-encoder reranking, a local open-source LLM, and a verification layer that checks every citation.
 
-[![CI](https://github.com/OWNER/ragdemia/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/ragdemia/actions/workflows/ci.yml)
+[![CI](https://github.com/Shreenitha0408/ragdemia/actions/workflows/ci.yml/badge.svg)](https://github.com/Shreenitha0408/ragdemia/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![No API keys](https://img.shields.io/badge/API%20keys-none%20required-brightgreen)
@@ -126,7 +126,7 @@ flowchart LR
 **1. Install**
 
 ```bash
-git clone https://github.com/OWNER/ragdemia.git
+git clone https://github.com/Shreenitha0408/ragdemia.git
 cd ragdemia
 python -m venv .venv
 ```
